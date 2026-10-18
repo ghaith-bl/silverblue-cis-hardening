@@ -1,0 +1,18 @@
+[Unit]
+Description=hostfw - host egress filter (nftables table inet hostfw)
+Documentation=file:///usr/local/sbin/hostfw
+DefaultDependencies=no
+Wants=network-pre.target
+Before=network-pre.target shutdown.target
+Conflicts=shutdown.target
+RequiresMountsFor=/usr/local/sbin /etc/hostfw
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/hostfw boot
+ExecReload=/usr/local/sbin/hostfw boot
+ExecStop=/usr/sbin/nft delete table inet hostfw
+
+[Install]
+WantedBy=multi-user.target

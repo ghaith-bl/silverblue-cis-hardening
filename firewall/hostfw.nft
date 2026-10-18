@@ -1,0 +1,274 @@
+#!/usr/sbin/nft -f
+# hostfw - host egress / forward filter + inbound logging
+#
+# Layers:
+#   inet firewalld        -> ingress owner (zones), untouched
+#   inet hostfw (this)    -> egress, forward, inbound logging
+#   ip libvirt_network    -> untouched
+#   ip nm-wg-proton0      -> untouched (NM WireGuard plumbing)
+#
+# Every base chain on a hook runs. drop/reject = final.
+# accept here = "no objection", the next table still decides.
+# => hostfw can only tighten, never open a hole.
+#
+# Mode: chain `enforce` empty = observe (log only), one reject rule = enforce.
+# Switched live by hostfw.sh. No reload.
+#
+# Naming contract (sectop):
+#   log prefix  HFW-<DIR>-<NAME>:     DIR = OUT | IN | FWD
+#   counter     <dir>_<name>
+#   rule comment = counter name
+
+table inet hostfw
+delete table inet hostfw
+
+table inet hostfw {
+
+	# ---------- interface classes ----------
+	# anything not listed = uplink (wlo1, enp44s0, hotspot, dock ...)
+
+	set if_trusted {
+		type ifname
+		comment "egress allowed, minus never-leave rules"
+		elements = { "lo", "proton0", "virbr0" }
+	}
+
+	set if_vm {
+		type ifname
+		comment "libvirt bridges"
+		elements = { "virbr0" }
+	}
+
+	set if_killsw {
+		type ifname
+		comment "ProtonVPN kill switch dummy"
+		elements = { "pvpnksintrf1" }
+	}
+
+	# ---------- addresses ----------
+
+	set vpn_dns4 {
+		type ipv4_addr
+		comment "ProtonVPN resolver inside the tunnel"
+		elements = { 10.2.0.1 }
+	}
+
+	set wg_fwmark {
+		type mark
+		comment "WireGuard transport mark, filled by: hostfw sync"
+	}
+
+	set router4 {
+		type ipv4_addr
+		comment "uplink gateways, filled by: hostfw sync"
+	}
+
+	set router_admin4 {
+		type ipv4_addr . inet_service
+		timeout 10m
+		comment "temporary router web UI, filled by: hostfw router-open"
+	}
+
+	set lan_allow4 {
+		type ipv4_addr . inet_proto . inet_service
+		comment "explicit LAN exceptions (static IP only)"
+		# elements = { 192.168.8.50 . tcp . 22 }
+	}
+
+	set lan4 {
+		type ipv4_addr
+		flags interval
+		comment "private, link-local, CGNAT, multicast, broadcast"
+		elements = { 10.0.0.0/8, 100.64.0.0/10, 169.254.0.0/16,
+			     172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/4,
+			     255.255.255.255 }
+	}
+
+	set lan6 {
+		type ipv6_addr
+		flags interval
+		comment "ULA, link-local, multicast"
+		elements = { fc00::/7, fe80::/10, ff00::/8 }
+	}
+
+	# ---------- counters (read by sectop) ----------
+
+	counter out_dns_vpn      { comment "DNS to VPN resolver via tunnel (allowed)" }
+	counter out_wg           { comment "WireGuard transport on uplink (allowed)" }
+	counter out_router_admin { comment "router web UI while open (allowed)" }
+	counter out_lan_allow    { comment "explicit LAN exceptions (allowed)" }
+	counter out_dns          { comment "DNS / DoT outside the VPN resolver" }
+	counter out_disco        { comment "discovery: mDNS LLMNR SSDP WSD NetBIOS NAT-PMP Steam LAN" }
+	counter out_share        { comment "file sharing: SMB NFS rpcbind AFP FTP TFTP" }
+	counter out_ks           { comment "host traffic hitting the kill switch" }
+	counter out_lan          { comment "host to LAN, not router/exception" }
+	counter out_leak         { comment "host to internet outside the tunnel" }
+	counter fwd_vm_ks        { comment "VM traffic hitting the kill switch" }
+	counter fwd_vm_lan       { comment "VM to LAN / outside the tunnel" }
+	counter fwd_in           { comment "new forwarded traffic not from a VM" }
+	counter in_noise         { comment "LAN broadcast / multicast to host" }
+	counter in_lan           { comment "new inbound from uplink (firewalld drops)" }
+	counter in_vpn           { comment "new inbound from tunnel (firewalld drops)" }
+
+	# ---------- mode switch ----------
+
+	chain enforce {
+		comment "empty = observe, single reject rule = enforce"
+	}
+
+	# ---------- deny: count + log + mode ----------
+
+	chain deny_out_dns {
+		counter name "out_dns"
+		limit rate 10/minute burst 20 packets log prefix "HFW-OUT-DNS: " level info flags skuid
+		jump enforce
+		accept
+	}
+
+	chain deny_out_disco {
+		counter name "out_disco"
+		limit rate 10/minute burst 20 packets log prefix "HFW-OUT-DISCO: " level info flags skuid
+		jump enforce
+		accept
+	}
+
+	chain deny_out_share {
+		counter name "out_share"
+		limit rate 10/minute burst 20 packets log prefix "HFW-OUT-SHARE: " level info flags skuid
+		jump enforce
+		accept
+	}
+
+	chain deny_out_lan {
+		counter name "out_lan"
+		limit rate 10/minute burst 20 packets log prefix "HFW-OUT-LAN: " level info flags skuid
+		jump enforce
+		accept
+	}
+
+	chain deny_out_leak {
+		counter name "out_leak"
+		limit rate 10/minute burst 20 packets log prefix "HFW-OUT-LEAK: " level info flags skuid
+		jump enforce
+		accept
+	}
+
+	chain deny_fwd_vm_lan {
+		counter name "fwd_vm_lan"
+		limit rate 10/minute burst 20 packets log prefix "HFW-FWD-VM-LAN: " level info
+		jump enforce
+		accept
+	}
+
+	chain deny_fwd_in {
+		counter name "fwd_in"
+		limit rate 10/minute burst 20 packets log prefix "HFW-FWD-IN: " level info
+		jump enforce
+		accept
+	}
+
+	# ---------- kill switch: always drop (dummy discards anyway) ----------
+
+	chain ks_out {
+		counter name "out_ks"
+		limit rate 10/minute burst 20 packets log prefix "HFW-OUT-KS: " level info flags skuid
+		drop
+	}
+
+	chain ks_fwd {
+		counter name "fwd_vm_ks"
+		limit rate 10/minute burst 20 packets log prefix "HFW-FWD-KS: " level info
+		drop
+	}
+
+	# ---------- allow + log (rare, worth seeing) ----------
+
+	chain allow_out_router_admin {
+		counter name "out_router_admin"
+		limit rate 10/minute burst 20 packets log prefix "HFW-OUT-ROUTER-ADMIN: " level info flags skuid
+		accept
+	}
+
+	chain allow_out_lan_allow {
+		counter name "out_lan_allow"
+		limit rate 10/minute burst 20 packets log prefix "HFW-OUT-LAN-ALLOW: " level info flags skuid
+		accept
+	}
+
+	# ---------- inbound: log only, firewalld zones decide ----------
+
+	chain log_in_noise {
+		counter name "in_noise"
+		limit rate 6/minute burst 10 packets log prefix "HFW-IN-NOISE: " level info
+		accept
+	}
+
+	chain log_in_lan {
+		counter name "in_lan"
+		limit rate 10/minute burst 20 packets log prefix "HFW-IN-LAN: " level info
+		accept
+	}
+
+	chain log_in_vpn {
+		counter name "in_vpn"
+		limit rate 10/minute burst 20 packets log prefix "HFW-IN-VPN: " level info
+		accept
+	}
+
+	# =================== base chains ===================
+
+	chain output {
+		type filter hook output priority filter - 10; policy accept;
+
+		ct state established,related accept comment "out_est"
+		oifname "lo" accept comment "out_lo"
+
+		# never leave (any interface)
+		meta l4proto { tcp, udp } th dport { 53, 853 } oifname "proton0" ip daddr @vpn_dns4 counter name "out_dns_vpn" accept comment "out_dns_vpn"
+		meta l4proto { tcp, udp } th dport { 53, 853 } oifname @if_vm accept comment "out_dns_vm"
+		meta l4proto { tcp, udp } th dport { 53, 853 } goto deny_out_dns comment "out_dns"
+		udp dport { 137, 138, 1900, 3702, 5351, 5353, 5355, 27036 } goto deny_out_disco comment "out_disco"
+		tcp dport { 5355, 5357, 5358, 27036, 27037 } goto deny_out_disco comment "out_disco"
+		oifname != @if_vm tcp dport { 21, 111, 139, 445, 548, 2049 } goto deny_out_share comment "out_share"
+		oifname != @if_vm udp dport { 69, 111, 2049 } goto deny_out_share comment "out_share"
+
+		oifname @if_trusted accept comment "out_trusted"
+		oifname @if_killsw goto ks_out comment "out_ks"
+
+		# uplink: tunnel transport + router only
+		meta mark @wg_fwmark counter name "out_wg" accept comment "out_wg"
+		udp sport 68 udp dport 67 accept comment "out_dhcp4"
+		ip daddr @router4 icmp type echo-request accept comment "out_router_icmp"
+		ip daddr . tcp dport @router_admin4 goto allow_out_router_admin comment "out_router_admin"
+		ip daddr . meta l4proto . th dport @lan_allow4 goto allow_out_lan_allow comment "out_lan_allow"
+		icmpv6 type { nd-router-solicit, nd-neighbor-solicit, nd-neighbor-advert, mld2-listener-report } accept comment "out_ndp6"
+		ip daddr @lan4 goto deny_out_lan comment "out_lan"
+		ip6 daddr @lan6 goto deny_out_lan comment "out_lan"
+		goto deny_out_leak comment "out_leak"
+	}
+
+	chain forward {
+		type filter hook forward priority filter - 10; policy accept;
+
+		ct state established,related accept comment "fwd_est"
+		iifname @if_vm oifname "proton0" accept comment "fwd_vm_vpn"
+		iifname @if_vm oifname @if_vm accept comment "fwd_vm_cross"
+		iifname @if_vm oifname @if_killsw goto ks_fwd comment "fwd_vm_ks"
+		iifname @if_vm goto deny_fwd_vm_lan comment "fwd_vm_lan"
+		ct state new goto deny_fwd_in comment "fwd_in"
+	}
+
+	chain input {
+		type filter hook input priority filter - 10; policy accept;
+		comment "log only - accept here hands over to firewalld"
+
+		ct state established,related accept comment "in_est"
+		iifname "lo" accept comment "in_lo"
+		iifname @if_vm accept comment "in_vm"
+		icmpv6 type { nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert, mld-listener-query } accept comment "in_ndp6"
+		udp sport 67 udp dport 68 accept comment "in_dhcp4"
+		iifname != "proton0" meta pkttype { broadcast, multicast } goto log_in_noise comment "in_noise"
+		iifname "proton0" ct state new goto log_in_vpn comment "in_vpn"
+		ct state new goto log_in_lan comment "in_lan"
+	}
+}

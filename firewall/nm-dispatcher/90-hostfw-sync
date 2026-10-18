@@ -1,0 +1,15 @@
+#!/bin/sh
+# NetworkManager dispatcher: keep hostfw sets in sync
+# (WireGuard fwmark after VPN reconnect, router after network change)
+# installed to /etc/NetworkManager/dispatcher.d/ by: hostfw install
+
+case "$2" in
+    up|vpn-up|dhcp4-change|reapply) ;;
+    *) exit 0 ;;
+esac
+
+[ -x /usr/local/sbin/hostfw ] || exit 0
+/usr/sbin/nft list table inet hostfw >/dev/null 2>&1 || exit 0
+
+/usr/local/sbin/hostfw sync 2>&1 | logger -t hostfw-dispatcher -p daemon.info
+exit 0
