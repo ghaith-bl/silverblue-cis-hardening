@@ -1,0 +1,98 @@
+{
+  "MetricsReportingEnabled": false,
+  "BraveP3AEnabled": false,
+  "BraveStatsPingEnabled": false,
+  "BraveWebDiscoveryEnabled": false,
+  "UrlKeyedAnonymizedDataCollectionEnabled": false,
+  "FeedbackSurveysEnabled": false,
+  "UserFeedbackAllowed": false,
+  "WebRtcEventLogCollectionAllowed": false,
+
+  "BraveRewardsDisabled": true,
+  "BraveWalletDisabled": true,
+  "BraveVPNDisabled": true,
+  "BraveAIChatEnabled": false,
+  "BraveLocalAIEnabled": false,
+  "BraveNewsDisabled": true,
+  "BraveTalkDisabled": true,
+  "BravePlaylistEnabled": false,
+  "BraveSpeedreaderEnabled": false,
+  "BraveWaybackMachineEnabled": false,
+  "EmailAliasesEnabled": false,
+  "TorDisabled": true,
+  "PromotionsEnabled": false,
+
+  "DefaultBraveAdblockSetting": 2,
+  "DefaultBraveFingerprintingV2Setting": 3,
+  "DefaultBraveHttpsUpgradeSetting": 2,
+  "DefaultBraveReferrersSetting": 2,
+  "BraveDeAmpEnabled": true,
+  "BraveDebouncingEnabled": true,
+  "BraveTrackingQueryParametersFilteringEnabled": true,
+  "BraveGlobalPrivacyControlEnabled": true,
+  "BraveReduceLanguageEnabled": true,
+
+  "VideoCaptureAllowed": false,
+  "AudioCaptureAllowed": false,
+  "ScreenCaptureAllowed": false,
+  "WebRtcIPHandling": "disable_non_proxied_udp",
+  "WebRtcLocalIpsAllowedUrls": [],
+  "DefaultGeolocationSetting": 2,
+  "DefaultSensorsSetting": 2,
+  "DefaultSerialGuardSetting": 2,
+  "DefaultWebUsbGuardSetting": 2,
+  "DefaultWebBluetoothGuardSetting": 2,
+  "DefaultWebHidGuardSetting": 2,
+  "DefaultFileSystemReadGuardSetting": 2,
+  "DefaultFileSystemWriteGuardSetting": 2,
+  "DefaultLocalFontsSetting": 2,
+  "DefaultWindowManagementSetting": 2,
+  "DefaultIdleDetectionSetting": 2,
+  "DefaultClipboardSetting": 2,
+  "DefaultNotificationsSetting": 2,
+  "DefaultPopupsSetting": 2,
+  "DefaultAutomaticDownloadsSetting": 2,
+  "DefaultInsecureContentSetting": 2,
+
+  "SafeBrowsingProtectionLevel": 1,
+  "SafeBrowsingSurveysEnabled": false,
+  "SafeBrowsingDeepScanningEnabled": false,
+  "PasswordLeakDetectionEnabled": false,
+  "DownloadRestrictions": 4,
+  "PromptForDownloadLocation": true,
+
+  "BlockThirdPartyCookies": true,
+  "HttpsOnlyMode": "force_enabled",
+  "HttpsUpgradesEnabled": true,
+  "DnsOverHttpsMode": "off",
+
+  "BrowserSignin": 0,
+  "SyncDisabled": true,
+
+  "PasswordManagerEnabled": false,
+  "AutofillAddressEnabled": false,
+  "AutofillCreditCardEnabled": false,
+  "AutofillSettings": [
+    { "url_pattern": "*", "blocked_types": ["all"] }
+  ],
+  "PaymentMethodQueryEnabled": false,
+
+  "SearchSuggestEnabled": false,
+
+  "NetworkPredictionOptions": 2,
+  "AlternateErrorPagesEnabled": false,
+  "BackgroundModeEnabled": false,
+  "SpellCheckServiceEnabled": false,
+  "TranslateEnabled": false,
+
+  "RemoteDebuggingAllowed": false,
+  "DeveloperToolsAvailability": 0,
+  "PrintingEnabled": true,
+  "IncognitoModeAvailability": 0,
+
+  "ExtensionInstallBlocklist": ["*"],
+  "ExtensionInstallAllowlist": [
+    "jplgfhpmjnbigmhklmmbgecoobifkmpa",
+    "cofdbpoegempjloogbagkncekinflcnj"
+  ]
+}

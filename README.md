@@ -112,3 +112,7 @@ sudo ostree admin config-diff                    # every /etc change vs. image d
 
 Research, script drafting and documentation done with help from Claude.
 Every change was reviewed, run and verified on my own machine.
+
+## Browsers
+
+- Brave + Firefox hardening: [browsers/README.md](browsers/README.md)

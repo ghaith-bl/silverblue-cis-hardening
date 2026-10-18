@@ -1,0 +1,110 @@
+{
+  "policies": {
+    "DisableTelemetry": true,
+    "DisableFirefoxStudies": true,
+    "DisableRemoteImprovements": true,
+    "DisableFeedbackCommands": true,
+    "DontCheckDefaultBrowser": true,
+    "SkipTermsOfUse": true,
+
+    "AIControls": {
+      "Default": { "Value": "blocked", "Locked": true }
+    },
+    "TranslateEnabled": false,
+    "GenerativeAI": {
+      "Enabled": false,
+      "Chatbot": false,
+      "LinkPreviews": false,
+      "TabGroups": false,
+      "Locked": true
+    },
+    "VisualSearchEnabled": false,
+    "IPProtectionAvailable": false,
+
+    "FirefoxHome": {
+      "Search": true,
+      "TopSites": false,
+      "SponsoredTopSites": false,
+      "Highlights": false,
+      "Stories": false,
+      "SponsoredStories": false,
+      "Locked": true
+    },
+    "FirefoxSuggest": {
+      "WebSuggestions": false,
+      "SponsoredSuggestions": false,
+      "ImproveSuggest": false,
+      "Locked": true
+    },
+    "UserMessaging": {
+      "ExtensionRecommendations": false,
+      "FeatureRecommendations": false,
+      "UrlbarInterventions": false,
+      "SkipOnboarding": true,
+      "MoreFromMozilla": false,
+      "FirefoxLabs": false,
+      "Locked": true
+    },
+
+    "Permissions": {
+      "Camera":         { "BlockNewRequests": true, "Locked": true },
+      "Microphone":     { "BlockNewRequests": true, "Locked": true },
+      "Location":       { "BlockNewRequests": true, "Locked": true },
+      "Notifications":  { "BlockNewRequests": true, "Locked": true },
+      "VirtualReality": { "BlockNewRequests": true, "Locked": true }
+    },
+
+    "EnableTrackingProtection": {
+      "Value": true,
+      "Cryptomining": true,
+      "Fingerprinting": true,
+      "EmailTracking": true,
+      "SuspectedFingerprinting": true
+    },
+    "HttpsOnlyMode": "force_enabled",
+    "DNSOverHTTPS": { "Enabled": false, "Locked": false },
+    "PostQuantumKeyAgreementEnabled": true,
+
+    "DisableFirefoxAccounts": true,
+    "PasswordManagerEnabled": false,
+    "OfferToSaveLogins": false,
+    "AutofillAddressEnabled": false,
+    "AutofillCreditCardEnabled": false,
+
+    "SearchEngines": { "Default": "DuckDuckGo" },
+    "SearchSuggestEnabled": false,
+    "NetworkPrediction": false,
+    "CaptivePortal": false,
+
+    "ExtensionSettings": {
+      "*": {
+        "installation_mode": "allowed",
+        "install_sources": ["https://addons.mozilla.org/*"]
+      }
+    },
+
+    "Preferences": {
+      "browser.safebrowsing.downloads.remote.enabled": { "Value": false, "Status": "locked" },
+
+      "media.peerconnection.ice.default_address_only": { "Value": true, "Status": "locked" },
+      "media.peerconnection.ice.no_host":              { "Value": true, "Status": "locked" },
+      "media.peerconnection.ice.proxy_only_if_behind_proxy": { "Value": true, "Status": "locked" },
+
+      "network.connectivity-service.enabled":   { "Value": false, "Status": "locked" },
+      "network.prefetch-next":                  { "Value": false, "Status": "locked" },
+      "network.http.speculative-parallel-limit": { "Value": 0, "Status": "locked" },
+      "browser.urlbar.speculativeConnect.enabled": { "Value": false, "Status": "locked" },
+      "browser.places.speculativeConnect.enabled": { "Value": false, "Status": "locked" },
+      "network.http.referer.XOriginTrimmingPolicy": { "Value": 2, "Status": "default" },
+      "network.IDN_show_punycode":              { "Value": true, "Status": "locked" },
+      "dom.security.https_only_mode_send_http_background_request": { "Value": false, "Status": "locked" },
+      "privacy.globalprivacycontrol.enabled":   { "Value": true, "Status": "locked" },
+
+      "browser.uitour.enabled":                 { "Value": false, "Status": "locked" },
+      "extensions.getAddons.showPane":          { "Value": false, "Status": "locked" },
+      "extensions.htmlaboutaddons.recommendations.enabled": { "Value": false, "Status": "locked" },
+      "signon.autofillForms":                   { "Value": false, "Status": "locked" },
+      "pdfjs.enableScripting":                  { "Value": false, "Status": "locked" }
+    }
+  }
+}
