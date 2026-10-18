@@ -1,0 +1,6 @@
+# Raw scan output contains hostname, IPs, MAC addresses and package lists
+scap-*.html
+scap-*.xml
+scap-*.txt
+*.arf.xml
+*.log
