@@ -28,7 +28,6 @@ Counters reset every boot -> use `hostfw report` (reads kernel journal).
 
 ## Open
 - connect after long offline (expired cert / stale list) in enforce
-- firewalld-cleanup.sh --permanent
 - `hostfw status | head` -> BrokenPipeError (handle SIGPIPE)
 
 ## 2026-10-19 probe exception
@@ -52,3 +51,6 @@ Counters reset every boot -> use `hostfw report` (reads kernel journal).
   (likely Proton DoH fallback while API blocked). Nothing left outside tunnel.
   Server list outdated at connect -> refresh blocked, connected from cache;
   serverlist.json refreshed via tunnel at 12:19.
+- 2026-10-19 firewalld-cleanup.sh --permanent: drop zone rich rules 192.168.122.0/24 accept
+  + 127.0.0.1 accept removed (runtime + permanent). Backup: ~/drop.xml.bak-2026-10-19.
+  After --reload: drop zone rich rules empty, hostfw mode enforce, curl OK.
