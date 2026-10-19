@@ -2,7 +2,7 @@
 
 CIS Fedora Benchmark **Level 2 – Workstation** hardening, tailored for a daily-driver
 Fedora Silverblue 44 laptop that also runs KVM/libvirt, rootless Podman (kind), Steam (Flatpak)
-and ProtonVPN (WireGuard + kill switch).
+and Proton VPN (official CLI, WireGuard + kill switch).
 
 Goal: apply as much of CIS L2 as possible **without breaking** the tools I use every day,
 and document every deviation with a reason.
@@ -27,7 +27,8 @@ Remaining `fail` items (approx.):
 - Fedora Silverblue 44 — rpm-ostree, composefs (`/` is overlay), kernel 7.2
 - LUKS full-disk encryption, SELinux enforcing, firewalld default zone `drop`
 - KVM/libvirt NAT network (`virbr0`), rootless Podman + kind, toolbox
-- Steam (Flatpak), ProtonVPN (WireGuard) with kill switch
+- Steam (Flatpak), Proton VPN CLI (RPM, WireGuard), kill switch "standard", connect at login
+- hostfw: own nftables egress filter next to firewalld, enforce from boot
 - OpenSCAP 1.4.4, scap-security-guide 0.1.82
 
 ## Usage
@@ -102,17 +103,23 @@ sudo ostree admin config-diff                    # every /etc change vs. image d
 - Removing a sysctl file does not revert values until reboot.
 - `kernel.kexec_load_disabled` and `kernel.unprivileged_bpf_disabled = 1` are one-way until reboot.
 
+## Planned
+
+- USBGuard, lock screen only
+- remove akmod-nvidia, then Secure Boot
+- health-report script
+
 ## Docs
 
 - [docs/deviations.md](docs/deviations.md) — what was not applied and why
 - [docs/verification.md](docs/verification.md) — tests run after hardening
 - [docs/lessons-learned.md](docs/lessons-learned.md) — findings worth remembering
+- [firewall/README.md](firewall/README.md) — hostfw egress filter: design, rules, tests
+- [firewall/docs/observe-log.md](firewall/docs/observe-log.md) — observe findings, changes, tests
+- [docs/proton-cli.md](docs/proton-cli.md) — Proton VPN CLI setup
+- [browsers/README.md](browsers/README.md) — Brave + Firefox hardening
 
 ## Credits
 
 Research, script drafting and documentation done with help from Claude.
 Every change was reviewed, run and verified on my own machine.
-
-## Browsers
-
-- Brave + Firefox hardening: [browsers/README.md](browsers/README.md)
