@@ -52,3 +52,9 @@ Input for an OpenSCAP tailoring file.
 | `file_groupownership_sshd_private_key` | Fedora uses group `ssh_keys` by design | — |
 | `sshd_*` | sshd is masked; hardened drop-in present | `systemctl is-enabled sshd` → `masked` |
 | ~17 `audit_rules_*` | rules loaded, different text format than the scanner regex | `sudo auditctl -l`, `ausearch -k <key>` |
+
+## Proton VPN CLI
+- me.proton.vpn.split_tunneling.service masked (eBPF, unused).
+- me.proton.vpn.kill_switch D-Bus service runs as root, no systemd sandboxing.
+  Not used by kill-switch "standard" (routing only). Re-check if "permanent" ships.
+- Kill switch "standard" is not applied at boot. hostfw adapts to it.

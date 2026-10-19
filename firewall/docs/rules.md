@@ -20,7 +20,7 @@ rate limit   10/min burst 20 per rule (noise: 6/min burst 10) -> counters are ex
 |---|---|---|
 | `if_trusted` | lo, proton0, virbr0 | egress allowed, minus never-leave rules |
 | `if_vm` | virbr0 | libvirt bridges |
-| `if_killsw` | pvpnksintrf1 | ProtonVPN kill switch dummy |
+| `if_killsw` | pvpnksintrf0, pvpnksintrf1 | ProtonVPN kill switch dummy |
 | (none) | wlo1, enp44s0, anything new | uplink - router + tunnel transport only |
 
 ## Dynamic sets

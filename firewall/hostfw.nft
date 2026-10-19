@@ -42,7 +42,7 @@ table inet hostfw {
 	set if_killsw {
 		type ifname
 		comment "ProtonVPN kill switch dummy"
-		elements = { "pvpnksintrf1" }
+		elements = { "pvpnksintrf0", "pvpnksintrf1" }
 	}
 
 	# ---------- addresses ----------

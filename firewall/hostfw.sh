@@ -14,9 +14,11 @@ DISPATCHER_DST=/etc/NetworkManager/dispatcher.d/90-hostfw-sync
 ROLLBACK=hostfw-rollback
 RUN_DIR=/run/hostfw
 DEADLINE_FILE=$RUN_DIR/rollback
+STATE_DIR=/var/lib/hostfw
+MARK_FILE=$STATE_DIR/wg_fwmark
 
 WG_IFACES=${HOSTFW_WG_IFACES:-proton0}
-KS_IFACES=${HOSTFW_KS_IFACES:-pvpnksintrf1}
+KS_IFACES=${HOSTFW_KS_IFACES:-pvpnksintrf0 pvpnksintrf1}
 
 SELF=$(readlink -f "${BASH_SOURCE[0]}")
 SELF_DIR=$(dirname "$SELF")
@@ -207,20 +209,40 @@ cmd_confirm() {
 
 cmd_sync() {
     need_root; need_table
-    local ifc mark found=0 dev gw
+    local ifc mark list saved dev gw
+    local marks=()
 
-    "$NFT" flush set $T wg_fwmark
+    # wg_fwmark: the mark is stable across reconnects, so keep the last
+    # known value while the tunnel is down (no empty window on reconnect)
     if command -v wg >/dev/null; then
         for ifc in $WG_IFACES; do
             mark=$(wg show "$ifc" fwmark 2>/dev/null || true)
             if [[ $mark =~ ^(0x[0-9a-fA-F]+|[1-9][0-9]*)$ ]]; then
-                "$NFT" add element $T wg_fwmark "{ $mark }"
+                marks+=("$mark")
                 log "wg_fwmark: $ifc $mark"
-                found=1
             fi
         done
     fi
-    (( found )) || log "wg_fwmark: none (tunnel down?) - WireGuard blocked on uplink in enforce mode"
+    if (( ${#marks[@]} )); then
+        list=$(IFS=,; echo "${marks[*]}")
+        "$NFT" -f - <<< "flush set $T wg_fwmark
+add element $T wg_fwmark { $list }"
+        saved=$(cat "$MARK_FILE" 2>/dev/null || true)
+        if [[ $saved != "$list" ]]; then
+            { install -d -m 0755 "$STATE_DIR" && echo "$list" > "$MARK_FILE"; } 2>/dev/null ||
+                log "wg_fwmark: could not save $MARK_FILE"
+        fi
+    elif [[ -r $MARK_FILE ]]; then
+        list=$(tr -d '[:space:]' < "$MARK_FILE")
+        if [[ $list =~ ^(0x[0-9a-fA-F]+|[1-9][0-9]*)(,(0x[0-9a-fA-F]+|[1-9][0-9]*))*$ ]]; then
+            "$NFT" add element $T wg_fwmark "{ $list }"
+            log "wg_fwmark: tunnel down - keeping last mark $list"
+        else
+            log "wg_fwmark: ignoring invalid $MARK_FILE"
+        fi
+    else
+        log "wg_fwmark: none yet (tunnel never seen) - WireGuard blocked on uplink in enforce mode"
+    fi
 
     "$NFT" flush set $T router4
     while read -r dev gw; do
@@ -235,7 +257,8 @@ cmd_router_open() {
     local min=${1:-10} gw n=0
     [[ $min =~ ^[0-9]+$ ]] && (( min >= 1 && min <= 120 )) || die "minutes: 1-120"
     while read -r _ gw; do
-        "$NFT" add element $T router_admin4 "{ $gw . 80 timeout ${min}m, $gw . 443 timeout ${min}m }"
+        "$NFT" -f - <<< "destroy element $T router_admin4 { $gw . 80, $gw . 443 }
+        add element $T router_admin4 { $gw . 80 timeout ${min}m, $gw . 443 timeout ${min}m }"
         log "router web UI open: $gw tcp 80,443 for ${min} min"
         n=1
     done < <(uplink_gateways)
@@ -274,7 +297,7 @@ cmd_report() {
     local since=${1:-7 days ago} top=${2:-40}
     [[ $top =~ ^[0-9]+$ ]] || die "top: number"
     echo "# hostfw report - since: $since (logged lines, rate-limited; exact totals: hostfw counters)"
-    journalctl -k --no-pager -o cat --since "$since" -g '^HFW-' 2>/dev/null |
+    journalctl _TRANSPORT=kernel --no-pager -o cat --since "$since" -g '^HFW-' 2>/dev/null |
     awk -v top="$top" '
     {
         pfx = $1; sub(/:$/, "", pfx)
@@ -353,6 +376,7 @@ hostfw - host egress filter (nftables table inet hostfw)
                              reverts to observe; --no-rollback to skip)
   confirm                    cancel pending rollback, save mode for boot (if installed)
   sync                       refresh wg_fwmark + router4 (after VPN reconnect / new network)
+                             tunnel down: keeps last wg_fwmark (/var/lib/hostfw/wg_fwmark)
   router-open [MIN]          allow router web UI tcp 80,443 for MIN (default 10) minutes
   status                     mode, rollback, sets, counters
   counters [--json]          per-rule counters (exact)
@@ -360,7 +384,7 @@ hostfw - host egress filter (nftables table inet hostfw)
   remove                     delete the runtime table
   install / uninstall        boot unit + NM dispatcher (+ /usr/local/sbin/hostfw)
 
-env: HOSTFW_RULESET, HOSTFW_WG_IFACES (proton0), HOSTFW_KS_IFACES (pvpnksintrf1)
+env: HOSTFW_RULESET, HOSTFW_WG_IFACES (proton0), HOSTFW_KS_IFACES (pvpnksintrf0 pvpnksintrf1)
 EOF
 }
 

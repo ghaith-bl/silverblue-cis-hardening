@@ -7,7 +7,7 @@ Own nftables table `inet hostfw`, next to firewalld. Zero trust LAN: router only
 
 - firewalld zones = ingress only. no HOST -> zone policies -> egress unfiltered
 - ProtonVPN kill switch = routing, not a packet filter:
-  - `pvpnksintrf1` dummy, default route metric 98 (blackhole)
+  - `pvpnksintrf0` / `pvpnksintrf1` dummy (index varies by client), default route metric 98 (blackhole)
   - `<endpoint> via <router> dev wlo1` host route for the VPN server
   - `ip rule 31505: not fwmark 0xea13b2c lookup <wg table>` -> everything else via proton0
 - `ip rule 31504: lookup main suppress_prefixlength 0` -> non-default routes in main win

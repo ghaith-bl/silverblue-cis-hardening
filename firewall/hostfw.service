@@ -5,7 +5,7 @@ DefaultDependencies=no
 Wants=network-pre.target
 Before=network-pre.target shutdown.target
 Conflicts=shutdown.target
-RequiresMountsFor=/usr/local/sbin /etc/hostfw
+RequiresMountsFor=/var/usrlocal/sbin /etc/hostfw
 
 [Service]
 Type=oneshot

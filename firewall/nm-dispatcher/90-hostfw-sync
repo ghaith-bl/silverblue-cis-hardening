@@ -4,7 +4,7 @@
 # installed to /etc/NetworkManager/dispatcher.d/ by: hostfw install
 
 case "$2" in
-    up|vpn-up|dhcp4-change|reapply) ;;
+        up|down|vpn-up|vpn-down|dhcp4-change|reapply) ;;
     *) exit 0 ;;
 esac
 
