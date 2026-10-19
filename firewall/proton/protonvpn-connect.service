@@ -1,0 +1,11 @@
+[Unit]
+Description=Proton VPN connect at login
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/protonvpn connect
+Restart=on-failure
+RestartSec=15
+
+[Install]
+WantedBy=default.target

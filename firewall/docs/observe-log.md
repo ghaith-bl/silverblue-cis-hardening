@@ -44,3 +44,11 @@ Counters reset every boot -> use `hostfw report` (reads kernel journal).
   proton_probe 908 IPs from client cache, router4 set.
 - Gap: Proton CLI does not connect at boot, kill switch "standard" not active at boot.
   Boot -> manual connect = unprotected in observe. Closed by hostfw boot mode enforce.
+- 2026-10-19 observe week ended early: boot mode enforce (rollback 5, confirmed, curl OK).
+- 2026-10-19 user unit protonvpn-connect.service (oneshot, Restart=on-failure 15s,
+  WantedBy=default.target). Reboot test: connected at login ~15 s, mode enforce.
+  Pre-connect window (all rejected): OUT-LEAK 4, OUT-DNS 22, OUT-KS 1, IN-NOISE 12.
+  OUT-LEAK = uid 1000 tcp/443 to 8.8.8.8, 8.8.4.4, 9.9.9.11, 149.112.112.11
+  (likely Proton DoH fallback while API blocked). Nothing left outside tunnel.
+  Server list outdated at connect -> refresh blocked, connected from cache;
+  serverlist.json refreshed via tunnel at 12:19.
