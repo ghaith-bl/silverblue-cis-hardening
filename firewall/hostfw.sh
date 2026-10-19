@@ -109,7 +109,8 @@ uplink_gateways() {   # prints "dev gw" for IPv4 default routes not on tunnel/ki
 }
 
 read -r -d '' PY_SET <<'PY' || true
-import json, sys
+import json, signal, sys
+signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 d = json.loads(sys.argv[1])
 is_mark = sys.argv[2] == "mark"
 def s(v):
@@ -137,7 +138,8 @@ for o in d["nftables"]:
 PY
 
 read -r -d '' PY_COUNTERS <<'PY' || true
-import json, sys
+import json, signal, sys
+signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 d = json.loads(sys.argv[1])
 rows = [o["counter"] for o in d["nftables"] if "counter" in o]
 print("%-18s %12s %14s  %s" % ("counter", "packets", "bytes", "comment"))

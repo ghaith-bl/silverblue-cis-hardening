@@ -28,7 +28,6 @@ Counters reset every boot -> use `hostfw report` (reads kernel journal).
 
 ## Open
 - connect after long offline (expired cert / stale list) in enforce
-- `hostfw status | head` -> BrokenPipeError (handle SIGPIPE)
 
 ## 2026-10-19 probe exception
 - proton_entry4 (908 EntryIPs) + proton_probe_tcp (443,7770,8443) filled by `hostfw sync`.
@@ -54,3 +53,6 @@ Counters reset every boot -> use `hostfw report` (reads kernel journal).
 - 2026-10-19 firewalld-cleanup.sh --permanent: drop zone rich rules 192.168.122.0/24 accept
   + 127.0.0.1 accept removed (runtime + permanent). Backup: ~/drop.xml.bak-2026-10-19.
   After --reload: drop zone rich rules empty, hostfw mode enforce, curl OK.
+- 2026-10-19 VM check after drop zone cleanup: host -> VM ssh OK, VM internet OK (tunnel).
+- 2026-10-19 BrokenPipeError fixed: PY_SET / PY_COUNTERS restore SIGPIPE default
+  (Python docs, "Note on SIGPIPE"). `hostfw status | head` clean. Reinstalled.
