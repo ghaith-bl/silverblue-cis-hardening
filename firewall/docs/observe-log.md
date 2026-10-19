@@ -1,6 +1,6 @@
 # hostfw observe log
 
-Observe week started 2026-10-18. Mode: observe.
+Observe week 2026-10-18 - 2026-10-19 (ended early). Boot mode: enforce since 2026-10-19.
 Counters reset every boot -> use `hostfw report` (reads kernel journal).
 
 ## Expected (not leaks)
@@ -9,7 +9,7 @@ Counters reset every boot -> use `hostfw report` (reads kernel journal).
 - OUT-LAN udp 547 / IN-LAN udp 546: NM DHCPv6. Fixed: IPv6 disabled on wifi connection (2026-10-19).
 - IN-NOISE: LAN device (TV) UDP 25860 broadcast. Pending: move to guest wifi.
 - OUT-LEAK on connect: Proton pre-connect probes, tcp 443/7770/8443, uid 1000, to target server.
-  Same as OpenVPN TCP DefaultPorts in clientconfig.json. Needs exception before enforce.
+  Same as OpenVPN TCP DefaultPorts in clientconfig.json. Exception added 2026-10-19 (out_probe).
 - out_wg +1 per connect (handshake by fwmark). fwmark 0xea13b2c constant across servers, days, clients.
 
 ## Data gaps
@@ -27,8 +27,8 @@ Counters reset every boot -> use `hostfw report` (reads kernel journal).
 - CLI connect: proton0 + pvpnksintrf0 back
 
 ## Open
-- reboot path: tested 2026-10-19, OK
-- probe exception, then enforce test again
+- connect after long offline (expired cert / stale list) in enforce
+- firewalld-cleanup.sh --permanent
 - `hostfw status | head` -> BrokenPipeError (handle SIGPIPE)
 
 ## 2026-10-19 probe exception
