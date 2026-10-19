@@ -30,3 +30,10 @@ Counters reset every boot -> use `hostfw report` (reads kernel journal).
 - reboot path not tested
 - probe exception, then enforce test again
 - `hostfw status | head` -> BrokenPipeError (handle SIGPIPE)
+
+## 2026-10-19 probe exception
+- proton_entry4 (908 EntryIPs) + proton_probe_tcp (443,7770,8443) filled by `hostfw sync`.
+- Test: connect -> out_probe +3. Works.
+- Connect fail once: server "session not found" (86203) right after server list refresh. Retry OK. Proton side.
+- After disconnect: client hits Proton API, public DoH/DNS IPs, AWS on tcp 443 to refresh server list.
+  In enforce this is blocked -> must test connect from cached list. No exception for these (too broad).

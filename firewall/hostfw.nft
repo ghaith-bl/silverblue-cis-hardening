@@ -47,6 +47,16 @@ table inet hostfw {
 
 	# ---------- addresses ----------
 
+	set proton_entry4 {
+		type ipv4_addr
+		comment "Proton entry IPs (serverlist.json), filled by hostfw sync"
+	}
+
+	set proton_probe_tcp {
+		type inet_service
+		comment "Proton pre-connect probe ports (clientconfig.json), filled by hostfw sync"
+	}
+
 	set vpn_dns4 {
 		type ipv4_addr
 		comment "ProtonVPN resolver inside the tunnel"
@@ -95,6 +105,7 @@ table inet hostfw {
 
 	counter out_dns_vpn      { comment "DNS to VPN resolver via tunnel (allowed)" }
 	counter out_wg           { comment "WireGuard transport on uplink (allowed)" }
+	counter out_probe        { comment "Proton pre-connect probes to entry IPs (allowed)" }
 	counter out_router_admin { comment "router web UI while open (allowed)" }
 	counter out_lan_allow    { comment "explicit LAN exceptions (allowed)" }
 	counter out_dns          { comment "DNS / DoT outside the VPN resolver" }
@@ -237,6 +248,7 @@ table inet hostfw {
 
 		# uplink: tunnel transport + router only
 		meta mark @wg_fwmark counter name "out_wg" accept comment "out_wg"
+		meta skuid 1000 tcp dport @proton_probe_tcp ip daddr @proton_entry4 counter name "out_probe" accept comment "out_probe"
 		udp sport 68 udp dport 67 accept comment "out_dhcp4"
 		ip daddr @router4 icmp type echo-request accept comment "out_router_icmp"
 		ip daddr . tcp dport @router_admin4 goto allow_out_router_admin comment "out_router_admin"
