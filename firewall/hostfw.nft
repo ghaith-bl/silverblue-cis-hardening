@@ -108,7 +108,9 @@ table inet hostfw {
 	counter out_probe        { comment "Proton pre-connect probes to entry IPs (allowed)" }
 	counter out_router_admin { comment "router web UI while open (allowed)" }
 	counter out_lan_allow    { comment "explicit LAN exceptions (allowed)" }
-	counter out_dns          { comment "DNS / DoT outside the VPN resolver" }
+	counter out_new          { comment "new host flows via tunnel (allowed, logged)" }
+	counter fwd_vm_new       { comment "new VM flows via tunnel (allowed, logged)" }
+	counter out_dns        { comment "DNS / DoT outside the VPN resolver" }
 	counter out_disco        { comment "discovery: mDNS LLMNR SSDP WSD NetBIOS NAT-PMP Steam LAN" }
 	counter out_share        { comment "file sharing: SMB NFS rpcbind AFP FTP TFTP" }
 	counter out_ks           { comment "host traffic hitting the kill switch" }
@@ -188,7 +190,7 @@ table inet hostfw {
 
 	chain ks_fwd {
 		counter name "fwd_vm_ks"
-		limit rate 10/minute burst 20 packets log prefix "HFW-FWD-KS: " level info
+		limit rate 10/minute burst 20 packets log prefix "HFW-FWD-VM-KS: " level info
 		drop
 	}
 
@@ -203,6 +205,23 @@ table inet hostfw {
 	chain allow_out_lan_allow {
 		counter name "out_lan_allow"
 		limit rate 10/minute burst 20 packets log prefix "HFW-OUT-LAN-ALLOW: " level info flags skuid
+		accept
+	}
+
+	# ---------- new flows via tunnel: allow + log (audit, sectop) ----------
+	# ct new = packets before the first reply: 1 per TCP connect, 1+ per UDP flow.
+	# same verdict as out_trusted / fwd_vm_vpn, logging only.
+	# higher limit than deny rules: one page load = tens of flows.
+
+	chain allow_out_new {
+		counter name "out_new"
+		limit rate 5/second burst 50 packets log prefix "HFW-OUT-NEW: " level info flags skuid
+		accept
+	}
+
+	chain allow_fwd_vm_new {
+		counter name "fwd_vm_new"
+		limit rate 5/second burst 50 packets log prefix "HFW-FWD-VM-NEW: " level info
 		accept
 	}
 
@@ -243,6 +262,7 @@ table inet hostfw {
 		oifname != @if_vm tcp dport { 21, 111, 139, 445, 548, 2049 } goto deny_out_share comment "out_share"
 		oifname != @if_vm udp dport { 69, 111, 2049 } goto deny_out_share comment "out_share"
 
+		oifname "proton0" ct state new goto allow_out_new comment "out_new"
 		oifname @if_trusted accept comment "out_trusted"
 		oifname @if_killsw goto ks_out comment "out_ks"
 
@@ -263,6 +283,7 @@ table inet hostfw {
 		type filter hook forward priority filter - 10; policy accept;
 
 		ct state established,related accept comment "fwd_est"
+		iifname @if_vm oifname "proton0" ct state new goto allow_fwd_vm_new comment "fwd_vm_new"
 		iifname @if_vm oifname "proton0" accept comment "fwd_vm_vpn"
 		iifname @if_vm oifname @if_vm accept comment "fwd_vm_cross"
 		iifname @if_vm oifname @if_killsw goto ks_fwd comment "fwd_vm_ks"

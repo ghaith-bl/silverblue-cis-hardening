@@ -389,13 +389,14 @@ cmd_report() {
         port  = ("DPT" in kv) ? kv["DPT"] : (("TYPE" in kv) ? "type" kv["TYPE"] : "-")
         uid   = ("UID" in kv) ? kv["UID"] : "-"
         total[pfx]++
+        if (pfx ~ /-NEW$/) next     # allowed new flows: per-rule total only, not top flows
         cnt[pfx " " ifc " " peer " " proto " " port " " uid]++
     }
     END {
         print "\n== per rule =="; fflush()
         for (p in total) printf "%8d  %s\n", total[p], p | "sort -rn"
         close("sort -rn")
-        print "\n== top flows =="
+        print "\n== top flows (without *-NEW) =="
         printf "%8s  %-22s %-16s %-40s %-7s %-8s %s\n", "lines", "rule", "iface", "peer", "proto", "port", "uid"
         fflush()
         cmd = "sort -rn | head -n " top

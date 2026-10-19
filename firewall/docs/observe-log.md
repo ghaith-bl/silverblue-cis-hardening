@@ -56,3 +56,10 @@ Counters reset every boot -> use `hostfw report` (reads kernel journal).
 - 2026-10-19 VM check after drop zone cleanup: host -> VM ssh OK, VM internet OK (tunnel).
 - 2026-10-19 BrokenPipeError fixed: PY_SET / PY_COUNTERS restore SIGPIPE default
   (Python docs, "Note on SIGPIPE"). `hostfw status | head` clean. Reinstalled.
+
+## 2026-10-19 audit logging (sectop)
+- out_new / fwd_vm_new: new flows via tunnel (ct new), accept + log, 5/s burst 50.
+  Same verdict as before, logging only. For the sectop audit view (who goes out).
+- HFW-FWD-KS renamed HFW-FWD-VM-KS: log kind now = counter name fwd_vm_ks (naming contract).
+- report: top flows skip *-NEW (per-rule totals still count them).
+- Journal before: 1.5G (journald default cap: 10% of /var, max 4G). Check growth after 1 day.

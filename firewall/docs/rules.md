@@ -12,6 +12,7 @@ comment      same as counter name, on every rule
 log flags    skuid on OUT rules     -> UID= in the log line (program name: not available)
 log level    info, kernel log       -> journalctl -k -g '^HFW-'
 rate limit   10/min burst 20 per rule (noise: 6/min burst 10) -> counters are exact, logs are samples
+             *-NEW rules: 5/s burst 50 (one page load = tens of flows)
 ```
 
 ## Interface classes
@@ -43,27 +44,30 @@ rate limit   10/min burst 20 per rule (noise: 6/min burst 10) -> counters are ex
 | 5 | out_dns | any other tcp/udp 53,853 | deny | HFW-OUT-DNS |
 | 6 | out_disco | udp 137,138,1900,3702,5351,5353,5355,27036 / tcp 5355,5357,5358,27036,27037 | deny | HFW-OUT-DISCO |
 | 7 | out_share | tcp 21,111,139,445,548,2049 / udp 69,111,2049, not via virbr0 | deny | HFW-OUT-SHARE |
-| 8 | out_trusted | oif in if_trusted | accept | - |
-| 9 | out_ks | oif in if_killsw | drop (always) | HFW-OUT-KS |
-| 10 | out_wg | meta mark in wg_fwmark | accept, counted | - |
-| 11 | out_dhcp4 | udp 68 -> 67 | accept | - |
-| 12 | out_router_icmp | icmp echo-request -> router4 | accept | - |
-| 13 | out_router_admin | ip . tcp port in router_admin4 | accept + log | HFW-OUT-ROUTER-ADMIN |
-| 14 | out_lan_allow | ip . proto . port in lan_allow4 | accept + log | HFW-OUT-LAN-ALLOW |
-| 15 | out_ndp6 | icmpv6 RS, NS, NA, MLDv2 report | accept | - |
-| 16 | out_lan | daddr private / link-local / CGNAT / multicast / broadcast | deny | HFW-OUT-LAN |
-| 17 | out_leak | anything else on uplink | deny | HFW-OUT-LEAK |
+| 8 | out_new | oif proton0, ct new | accept + log | HFW-OUT-NEW |
+| 9 | out_trusted | oif in if_trusted | accept | - |
+| 10 | out_ks | oif in if_killsw | drop (always) | HFW-OUT-KS |
+| 11 | out_wg | meta mark in wg_fwmark | accept, counted | - |
+| 12 | out_probe | uid 1000 tcp proton_probe_tcp -> proton_entry4 | accept, counted | - |
+| 13 | out_dhcp4 | udp 68 -> 67 | accept | - |
+| 14 | out_router_icmp | icmp echo-request -> router4 | accept | - |
+| 15 | out_router_admin | ip . tcp port in router_admin4 | accept + log | HFW-OUT-ROUTER-ADMIN |
+| 16 | out_lan_allow | ip . proto . port in lan_allow4 | accept + log | HFW-OUT-LAN-ALLOW |
+| 17 | out_ndp6 | icmpv6 RS, NS, NA, MLDv2 report | accept | - |
+| 18 | out_lan | daddr private / link-local / CGNAT / multicast / broadcast | deny | HFW-OUT-LAN |
+| 19 | out_leak | anything else on uplink | deny | HFW-OUT-LEAK |
 
 ## forward
 
 | # | comment | match | action | prefix |
 |---|---|---|---|---|
 | 1 | fwd_est | ct established,related | accept | - |
-| 2 | fwd_vm_vpn | virbr0 -> proton0 | accept | - |
-| 3 | fwd_vm_cross | virbr0 -> virbr0 | accept | - |
-| 4 | fwd_vm_ks | virbr0 -> kill switch | drop (always) | HFW-FWD-KS |
-| 5 | fwd_vm_lan | virbr0 -> anything else (LAN, uplink) | deny | HFW-FWD-VM-LAN |
-| 6 | fwd_in | any other new forwarded flow | deny | HFW-FWD-IN |
+| 2 | fwd_vm_new | virbr0 -> proton0, ct new | accept + log | HFW-FWD-VM-NEW |
+| 3 | fwd_vm_vpn | virbr0 -> proton0 | accept | - |
+| 4 | fwd_vm_cross | virbr0 -> virbr0 | accept | - |
+| 5 | fwd_vm_ks | virbr0 -> kill switch | drop (always) | HFW-FWD-VM-KS |
+| 6 | fwd_vm_lan | virbr0 -> anything else (LAN, uplink) | deny | HFW-FWD-VM-LAN |
+| 7 | fwd_in | any other new forwarded flow | deny | HFW-FWD-IN |
 
 ## input (log only - firewalld zones decide)
 
@@ -77,6 +81,13 @@ rate limit   10/min burst 20 per rule (noise: 6/min burst 10) -> counters are ex
 | 6 | in_noise | not proton0, broadcast / multicast | pass + sampled log | HFW-IN-NOISE |
 | 7 | in_vpn | iif proton0, ct new | pass + log | HFW-IN-VPN |
 | 8 | in_lan | anything else, ct new | pass + log | HFW-IN-LAN |
+
+`*-NEW` = audit of allowed flows via the tunnel (sectop):
+- `ct new` = packets of a flow before its first reply: 1 line per TCP connect,
+  1+ per UDP flow (more if the peer never answers, rate limit applies)
+- same verdict as the next rule (`out_trusted` / `fwd_vm_vpn`), logging only
+- DNS to 10.2.0.1 is counted (`out_dns_vpn`), not logged
+- `hostfw report`: per-rule totals only, not in top flows
 
 `deny` = count + log + `jump enforce`:
 - observe: `enforce` empty -> accepted, logged only

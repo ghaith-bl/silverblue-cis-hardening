@@ -55,7 +55,8 @@ Installed paths:
 
 - observe: denied traffic counted + logged, still passes
 - enforce: denied traffic rejected (`icmpx admin-prohibited`, apps fail fast)
-- kill switch hits (`HFW-OUT-KS`, `HFW-FWD-KS`): always dropped
+- kill switch hits (`HFW-OUT-KS`, `HFW-FWD-VM-KS`): always dropped
+- new flows via tunnel (`HFW-OUT-NEW`, `HFW-FWD-VM-NEW`): allowed, logged (audit, sectop)
 - switch = flush/add one rule in chain `enforce`. live, atomic, no reload
 
 ## Workflow
@@ -115,6 +116,7 @@ Watch for:
 - `HFW-OUT-DISCO` brave / steam -> expected, keep blocked
 - `HFW-IN-LAN` -> who on the LAN tries to reach me
 - `HFW-OUT-KS` -> app traffic while tunnel down
+- `HFW-OUT-NEW` -> every new flow via tunnel (allowed): who talks to what. Not in report top flows
 
 Decide exceptions from data, not guesses.
 
@@ -141,6 +143,8 @@ Positive - must work:
 
 ```bash
 curl -sI https://fedoraproject.org | head -1
+sudo hostfw counters | grep -E 'out_new|fwd_vm_new'     # out_new grows with new flows
+journalctl -k -n 3 --no-pager -g '^HFW-OUT-NEW'          # UID=1000, OUT=proton0
 ping -c1 "$(ip -4 route show default dev wlo1 | awk '{print $3; exit}')"
 sudo virsh start <vm>; ssh <vm>           # VM: curl -sI https://fedoraproject.org
 podman run --rm registry.fedoraproject.org/fedora-minimal curl -sI https://fedoraproject.org
@@ -179,7 +183,8 @@ sudo firewall-cmd --reload          # revert runtime firewalld cleanup
 ## Known limits
 
 - netfilter has no program names: UID only (Flatpak apps, pasta = 1000; WireGuard, NM, chronyd = 0)
-- logs rate-limited -> counters exact, logs = samples
+- logs rate-limited -> counters exact, logs = samples (*-NEW: 5/s burst 50)
+- *-NEW = allowed flows, logged only: no per-program control (netfilter has no program names)
 - table reload (`apply`, `systemctl reload`) resets counters + router-open entries
 - boot in enforce: WireGuard handshake rejected until dispatcher syncs `wg_fwmark` on proton0 up
   (wg retries every 5 s) -> verify after install
