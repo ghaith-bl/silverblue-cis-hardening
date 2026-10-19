@@ -37,3 +37,6 @@ Counters reset every boot -> use `hostfw report` (reads kernel journal).
 - Connect fail once: server "session not found" (86203) right after server list refresh. Retry OK. Proton side.
 - After disconnect: client hits Proton API, public DoH/DNS IPs, AWS on tcp 443 to refresh server list.
   In enforce this is blocked -> must test connect from cached list. No exception for these (too broad).
+- Enforce test (rollback 5 min): connected -> OK. Disconnect -> no internet (fail closed).
+  Connect from cached server list -> OK ("Timed out ... tasks" = blocked list refresh, harmless).
+- Open: connect after long offline (expired cert / stale list) in enforce.
