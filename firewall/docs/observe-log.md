@@ -63,3 +63,16 @@ Counters reset every boot -> use `hostfw report` (reads kernel journal).
 - HFW-FWD-KS renamed HFW-FWD-VM-KS: log kind now = counter name fwd_vm_ks (naming contract).
 - report: top flows skip *-NEW (per-rule totals still count them).
 - Journal before: 1.5G (journald default cap: 10% of /var, max 4G). Check growth after 1 day.
+- Live test (enforce, rollback 5): curl via tunnel OK, out_new +1, log UID=1000 OUT=proton0,
+  curl --interface wlo1 rejected. Confirmed, installed.
+
+## 2026-10-19 other wifi (<wifi profile>)
+- New profile = ipv6.method auto -> DHCPv6 solicit from wlo1 every few s (OUT-LAN, udp 546 -> ff02::1:2 547).
+  Fixed: `nmcli connection modify <wifi profile> ipv6.method disabled`, then reconnect. Solicits stopped.
+- NetworkManager.conf(5) [connection] defaults do not include ipv6.method -> disable per profile,
+  every new wifi. Planned: sectop posture check (all wifi profiles ipv6 disabled).
+- OUT-KS v6 drops: chronyd NTP, uid 1000 tcp/443. Source fdeb:446c:912d:8da:: = ULA on
+  pvpnksintrf0 (Proton KS dummy, also 100.85.0.1). Apps try v6, v6 default -> dummy. Expected.
+- Wifi reconnect: WireGuard transport 100.85.0.1:39567 -> endpoint:443 (no uid) dropped at
+  pvpnksintrf0, handshake stale 6 min (sectop crit "handshake stale"). Fail closed, no leak.
+  Open: does the Proton CLI recover alone after a network change, or reconnect needed.
