@@ -27,7 +27,7 @@ Counters reset every boot -> use `hostfw report` (reads kernel journal).
 - CLI connect: proton0 + pvpnksintrf0 back
 
 ## Open
-- reboot path not tested
+- reboot path: tested 2026-10-19, OK
 - probe exception, then enforce test again
 - `hostfw status | head` -> BrokenPipeError (handle SIGPIPE)
 
@@ -40,3 +40,7 @@ Counters reset every boot -> use `hostfw report` (reads kernel journal).
 - Enforce test (rollback 5 min): connected -> OK. Disconnect -> no internet (fail closed).
   Connect from cached server list -> OK ("Timed out ... tasks" = blocked list refresh, harmless).
 - Open: connect after long offline (expired cert / stale list) in enforce.
+- 2026-10-19 reboot test passed: hostfw.service at boot, mode observe, wg_fwmark restored,
+  proton_probe 908 IPs from client cache, router4 set.
+- Gap: Proton CLI does not connect at boot, kill switch "standard" not active at boot.
+  Boot -> manual connect = unprotected in observe. Closed by hostfw boot mode enforce.
