@@ -58,3 +58,8 @@ Input for an OpenSCAP tailoring file.
 - me.proton.vpn.kill_switch D-Bus service runs as root, no systemd sandboxing.
   Not used by kill-switch "standard" (routing only). Re-check if "permanent" ships.
 - Kill switch "standard" is not applied at boot. hostfw adapts to it.
+- CLI does not connect at boot. Boot -> login covered by hostfw boot mode enforce
+  (2026-10-19): no internet outside the tunnel before connect.
+- Connect at login via user unit protonvpn-connect.service (firewall/proton/),
+  not at boot: CLI auth is per user.
+- hostfw observe week ended after 1 day (2026-10-19). Findings: firewall/docs/observe-log.md.
