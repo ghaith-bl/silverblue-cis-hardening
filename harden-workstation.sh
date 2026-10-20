@@ -18,7 +18,8 @@
 #   - ip_forward = 0 / remove dnsmasq -> libvirt NAT network for KVM, rootful podman
 #   - rp_filter = 1 (strict)    -> can drop ProtonVPN WireGuard traffic (using 2)
 #   - forced password expiry    -> NIST SP 800-63B advises against it
-#   - auditd HALT / KEEP_LOGS   -> a full disk would halt the laptop
+#   - auditd HALT               -> a full disk would halt the laptop
+#   - auditd KEEP_LOGS          -> no limit, /var also holds /var/home (ROTATE, 40 x 32 MiB)
 # =============================================================================
 set -euo pipefail
 
@@ -373,7 +374,12 @@ sec_auditd() {
   set_kv "$f" space_left_action SYSLOG
   set_kv "$f" admin_space_left_action SUSPEND
   set_kv "$f" disk_full_action SUSPEND
-  # max_log_file_action stays ROTATE (CIS KEEP_LOGS can fill a laptop disk).
+  # ROTATE, not CIS KEEP_LOGS: KEEP_LOGS has no limit and /var also holds /var/home.
+  # Ring 40 x 32 MiB = 1280 MiB: >= 1 week of records at the worst rate estimated
+  # 2026-10-20 (sectop polling as root every 6 s). DISA STIG RHEL 9 V-258155.
+  set_kv "$f" max_log_file_action ROTATE
+  set_kv "$f" max_log_file 32
+  set_kv "$f" num_logs 40
   chmod 0640 "$f"
   if auditctl --signal reload >/dev/null 2>&1; then log "auditd configuration reloaded"; else warn "reload auditd manually or reboot"; fi
 }

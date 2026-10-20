@@ -83,7 +83,7 @@ sudo ./harden-workstation.sh pam      # with a root shell open
 | `services`    | mask rpcbind / nfs / avahi, disable+mask nftables.service (not stopped live) | no mDNS |
 | `cron`        | root-only cron dirs, `cron.allow` / `at.allow` | only root + your user can use crontab |
 | `sshd`        | hardened drop-in `40-cis.conf`, server masked | no incoming SSH |
-| `auditd`      | SYSLOG / SUSPEND actions instead of HALT | none |
+| `auditd`      | SYSLOG / SUSPEND actions instead of HALT, log ring 40 x 32 MiB | up to 1280 MiB in `/var/log/audit` |
 | `audit-rules` | ~70 CIS rules, `-c`, setuid list | more log volume |
 | `perms`       | audit config 0640, GRUB cfg 0600, shell rc files 0740 | none |
 | `mic`         | WirePlumber rule disables capture nodes | no microphone |
