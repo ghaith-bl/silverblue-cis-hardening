@@ -76,3 +76,16 @@ Counters reset every boot -> use `hostfw report` (reads kernel journal).
 - Wifi reconnect: WireGuard transport 100.85.0.1:39567 -> endpoint:443 (no uid) dropped at
   pvpnksintrf0, handshake stale 6 min (sectop crit "handshake stale"). Fail closed, no leak.
   Open: does the Proton CLI recover alone after a network change, or reconnect needed.
+
+## 2026-10-20 cold boot (off ~13 h) + journal check
+- Wifi up late. Proton CLI failed 3x (10:38-10:39, "Connection failed"), connected on try 4
+  at 10:40:27 (Restart=on-failure, RestartSec=15): ~2 min 40 s after login. No action.
+- Pre-connect: OUT-LEAK 4 (DoH fallback 149.112.112.11, 9.9.9.11, 8.8.8.8, 8.8.4.4, tcp/443,
+  uid 1000), all rejected (boot mode enforce). Same as 2026-10-19.
+- "Server list is outdated": update blocked pre-connect (by design). serverlist.json
+  refreshed ~1.5 min after connect (via tunnel). No drift.
+- 2026-10-19 17:50:05 OUT-LEAK 2 (uid 1000, wlo1, tcp/443, 2 addresses) = my live test
+  `curl --interface wlo1`, 1 s after enforce -> rejected. Not a leak.
+- Journal 1.5G -> 1.7G. out_new = 0.8% of entries (boot 2026-10-19 17:09: 3440 of 433116).
+  93% = audit records (402826) from sectop polling as root (rule root_cmds). Fix in sectop
+  (fewer commands, then privilege split). journald cap unchanged. Closed.
