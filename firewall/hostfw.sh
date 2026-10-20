@@ -73,8 +73,11 @@ rollback_arm() {   # $1 = minutes, rest = command to run
     rollback_clear
     systemd-run --quiet --unit="$ROLLBACK" --on-active="${min}min" \
         --timer-property=AccuracySec=1s "$@"
-    install -d -m 0700 "$RUN_DIR"
+    # 0755 / 0644: sectop's collector (user sectop, not root) shows the deadline.
+    # Deadline + action only, nothing secret.
+    install -d -m 0755 "$RUN_DIR"
     printf '%s\n%s\n' "$(( $(date +%s) + min * 60 ))" "$*" > "$DEADLINE_FILE"
+    chmod 0644 "$DEADLINE_FILE"
     log "rollback in ${min} min -> $*"
     log "keep it with: sudo $0 confirm"
 }
