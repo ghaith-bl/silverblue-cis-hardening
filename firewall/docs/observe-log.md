@@ -87,6 +87,11 @@ Counters reset every boot -> use `hostfw report` (reads kernel journal).
   "an active connection" can be the KS dummy (default route). Connect fails with an
   uplink: retry 15 s doubling to 4 min (RestartSteps=4, RestartMaxDelaySec=4min,
   systemd.service(5), v254+; host systemd 259).
+- Test 2026-10-25 (installed unit): VPN disconnected, wifi off, unit restarted ->
+  activating (start-pre), one journal line, no connect attempt. Wifi on -> uplink seen
+  ~10 s later, "Server list is outdated" refresh + connect 40 s, Finished. No failed
+  attempt, 2 lines from the wait. nmcli after: `dummy:connected` (KS dummy counts as a
+  connected device, so the wifi / ethernet check is needed, not nm-online alone).
 
 ## 2026-10-20 cold boot (off ~13 h) + journal check
 - Wifi up late. Proton CLI failed 3x (10:38-10:39, "Connection failed"), connected on try 4
