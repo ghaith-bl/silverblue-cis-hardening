@@ -1,11 +1,19 @@
 [Unit]
-Description=Proton VPN connect at login
+Description=Proton VPN connect at login, once wifi / ethernet is up
 
 [Service]
 Type=oneshot
+# No connect attempt while offline: wait for an uplink first (event-driven, quiet).
+ExecStartPre=%h/.local/bin/protonvpn-wait-uplink
 ExecStart=/usr/bin/protonvpn connect
+# Connect failed with the uplink up (Proton API, server list): retry after 15 s,
+# doubling to 4 min (systemd.service(5): RestartSteps= + RestartMaxDelaySec=, v254+).
 Restart=on-failure
 RestartSec=15
+RestartSteps=4
+RestartMaxDelaySec=4min
+# oneshot: no start timeout by default (systemd.service(5)); the wait may take hours.
+TimeoutStartSec=infinity
 
 [Install]
 WantedBy=default.target

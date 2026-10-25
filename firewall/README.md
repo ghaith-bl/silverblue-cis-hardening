@@ -38,6 +38,8 @@ hostfw.sh                     apply | observe | enforce | confirm | sync | route
 hostfw.service                boot unit (own unit - not nftables.service)
 nm-dispatcher/90-hostfw-sync  re-sync wg_fwmark + router4 on VPN / network up
 firewalld-cleanup.sh          drop-zone legacy rich rules (runtime, then --permanent)
+proton/protonvpn-connect.service  user unit: connect at login, once wifi / ethernet is up
+proton/protonvpn-wait-uplink  its ExecStartPre (nm-online + device state)
 docs/rules.md                 every rule, prefix, counter (sectop contract)
 ```
 
@@ -178,6 +180,21 @@ sudo ./hostfw.sh observe            # stop rejecting, keep logging
 sudo ./hostfw.sh remove             # delete runtime table
 sudo ./hostfw.sh uninstall          # unit + dispatcher + /usr/local/sbin/hostfw
 sudo firewall-cmd --reload          # revert runtime firewalld cleanup
+```
+
+## Proton connect at login (user unit)
+
+No connect attempt while offline: the unit waits until a wifi / ethernet device is
+connected, then runs `protonvpn connect`. A failed connect with the uplink up retries
+after 15 s, doubling to 4 min (15 30 60 120 240).
+
+```bash
+install -D -m 0755 proton/protonvpn-wait-uplink ~/.local/bin/protonvpn-wait-uplink
+install -D -m 0644 proton/protonvpn-connect.service ~/.config/systemd/user/protonvpn-connect.service
+systemctl --user daemon-reload
+systemctl --user enable protonvpn-connect.service
+systemctl --user status protonvpn-connect.service     # waiting: activating (start-pre)
+systemctl --user stop protonvpn-connect.service       # no auto connect this login
 ```
 
 ## Known limits

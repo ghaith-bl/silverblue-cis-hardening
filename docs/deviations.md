@@ -62,5 +62,6 @@ Input for an OpenSCAP tailoring file.
 - CLI does not connect at boot. Boot -> login covered by hostfw boot mode enforce
   (2026-10-19): no internet outside the tunnel before connect.
 - Connect at login via user unit protonvpn-connect.service (firewall/proton/),
-  not at boot: CLI auth is per user.
+  not at boot: CLI auth is per user. Waits for wifi / ethernet before the first try
+  (protonvpn-wait-uplink), then retries 15 s doubling to 4 min (2026-10-25).
 - hostfw observe week ended after 1 day (2026-10-19). Findings: firewall/docs/observe-log.md.

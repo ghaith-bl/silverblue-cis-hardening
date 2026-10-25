@@ -77,6 +77,17 @@ Counters reset every boot -> use `hostfw report` (reads kernel journal).
   pvpnksintrf0, handshake stale 6 min (sectop crit "handshake stale"). Fail closed, no leak.
   Open: does the Proton CLI recover alone after a network change, or reconnect needed.
 
+## 2026-10-25 offline: connect loop
+- Offline at login (or wifi late): `protonvpn connect` failed every 15 s
+  (Restart=on-failure, RestartSec=15, no limit), each try left journal lines, and a
+  manual disconnect did not stop it: the unit kept trying. Seen 2026-10-20 cold boot
+  (3 fails before wifi was up).
+- Fix: ExecStartPre=protonvpn-wait-uplink: waits until a wifi / ethernet device is
+  connected (nmcli device state), event-driven via nm-online(1). Not nm-online alone:
+  "an active connection" can be the KS dummy (default route). Connect fails with an
+  uplink: retry 15 s doubling to 4 min (RestartSteps=4, RestartMaxDelaySec=4min,
+  systemd.service(5), v254+; host systemd 259).
+
 ## 2026-10-20 cold boot (off ~13 h) + journal check
 - Wifi up late. Proton CLI failed 3x (10:38-10:39, "Connection failed"), connected on try 4
   at 10:40:27 (Restart=on-failure, RestartSec=15): ~2 min 40 s after login. No action.
