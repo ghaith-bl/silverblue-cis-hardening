@@ -55,8 +55,14 @@ table inet hostfw {
 
 	set wg_fwmark {
 		type mark
-		comment "Mullvad mark: relay transport + daemon API on the uplink; refreshed by: hostfw sync"
+		comment "Mullvad mark: relay transport on the uplink; refreshed by: hostfw sync"
 		elements = { 0x6d6f6c65 }
+	}
+
+	set vpn_api4 {
+		type ipv4_addr
+		comment "Mullvad API, tcp/443 from root outside the tunnel (same as inet mullvad)"
+		elements = { 45.83.223.196 }
 	}
 
 	set router4 {
@@ -95,7 +101,8 @@ table inet hostfw {
 	# ---------- counters (read by sectop) ----------
 
 	counter out_dns_vpn      { comment "DNS to VPN resolver via tunnel (allowed)" }
-	counter out_wg           { comment "Mullvad mark on uplink: relay transport, daemon API (allowed)" }
+	counter out_wg           { comment "Mullvad mark on uplink: relay transport (allowed)" }
+	counter out_vpn_api      { comment "Mullvad daemon API on uplink, root tcp/443 (allowed)" }
 	counter out_router_admin { comment "router web UI while open (allowed)" }
 	counter out_lan_allow    { comment "explicit LAN exceptions (allowed)" }
 	counter out_new          { comment "new host flows via tunnel (allowed, logged)" }
@@ -239,10 +246,13 @@ table inet hostfw {
 		oifname @if_vpn ct state new goto allow_out_new comment "out_new"
 		oifname @if_trusted accept comment "out_trusted"
 
-		# uplink: tunnel transport + daemon API + router only.
+		# uplink: tunnel transport + VPN API + router only.
 		# Split tunneling (mullvad-exclude) marks its traffic with the same mark plus
 		# ct mark 0xf41: not accepted here -> out_lan / out_leak.
 		meta mark @wg_fwmark ct mark != 0x00000f41 counter name "out_wg" accept comment "out_wg"
+		# Mullvad API while not connected: no mark, uid 0 (inet mullvad allows the same:
+		# ip daddr 45.83.223.196 tcp dport 443 meta skuid 0, host 2026-10-26)
+		meta skuid 0 ip daddr @vpn_api4 tcp dport 443 counter name "out_vpn_api" accept comment "out_vpn_api"
 		udp sport 68 udp dport 67 accept comment "out_dhcp4"
 		ip daddr @router4 icmp type echo-request accept comment "out_router_icmp"
 		ip daddr . tcp dport @router_admin4 goto allow_out_router_admin comment "out_router_admin"

@@ -40,6 +40,7 @@ Not used: split tunneling, custom DNS, DNS content blockers, Allow LAN.
 | tunnel | `wg0-mullvad` | `if_vpn`, `if_trusted` |
 | DNS | 10.64.0.1 via the tunnel (systemd-resolved, `~.`) | `vpn_dns4` |
 | mark | 0x6d6f6c65 (`wg show wg0-mullvad fwmark`) | `wg_fwmark` -> `out_wg` |
+| API outside the tunnel | uid 0 tcp/443 to 45.83.223.196, no mark | `vpn_api4` -> `out_vpn_api` |
 | routing | `not fwmark 0x6d6f6c65 lookup 1836018789` (table id = the mark) | - |
 | kill switch | table `inet mullvad`, policy drop in / out / forward | not touched |
 | split tunneling | ct mark 0xf41 + mark 0x6d6f6c65 | not accepted -> out_leak |
@@ -49,8 +50,12 @@ Not used: split tunneling, custom DNS, DNS content blockers, Allow LAN.
 - The daemon's API calls outside the tunnel do NOT carry the mark (host 2026-10-26: uid 0
   tcp/443 to 45.83.223.196 and 217.138.213.18, then DoH fallbacks 1.1.1.1 1.0.0.1
   9.9.9.9 149.112.112.112) -> out_leak, rejected in enforce. Connect still works (cached
-  relay list); inside the tunnel the API is allowed (out_new). Exception: open, after
-  reading Mullvad's own rule for it.
+  relay list); inside the tunnel the API is allowed (out_new).
+- Mullvad's own rule while disconnected (`mullvad disconnect; sudo nft list chain inet
+  mullvad output`, 2026-10-26): `ip daddr 45.83.223.196 tcp dport 443 meta skuid 0
+  accept`. hostfw does the same: set `vpn_api4`, rule `out_vpn_api`. Another API address
+  (Mullvad changes it) = OUT-LEAK uid 0 tcp/443 again: compare with that chain, update
+  `vpn_api4`. The DoH fallbacks stay blocked.
 - ICMP echo TTL=1 to the relay on wlo1, uid 0, no mark (before / at connect): rejected,
   connect not affected.
 - `inet mullvad` and `inet hostfw` both filter: a packet leaves only if both accept.

@@ -29,6 +29,7 @@ rate limit   10/min burst 20 per rule (noise: 6/min burst 10) -> counters are ex
 | set | filled by | content |
 |---|---|---|
 | `wg_fwmark` | ruleset (0x6d6f6c65), `hostfw sync` / NM dispatcher | `wg show wg0-mullvad fwmark` |
+| `vpn_api4` | ruleset (45.83.223.196) | Mullvad API, the address inet mullvad allows outside the tunnel |
 | `router4` | `hostfw sync` / NM dispatcher | IPv4 default gateways, not the tunnel |
 | `router_admin4` | `hostfw router-open [MIN]` | gw . 80, gw . 443 with timeout |
 | `lan_allow4` | edit `hostfw.nft` | static `ip . proto . port` exceptions |
@@ -47,16 +48,18 @@ rate limit   10/min burst 20 per rule (noise: 6/min burst 10) -> counters are ex
 | 8 | out_new | oif in if_vpn, ct new | accept + log | HFW-OUT-NEW |
 | 9 | out_trusted | oif in if_trusted | accept | - |
 | 10 | out_wg | meta mark in wg_fwmark, ct mark not 0xf41 | accept, counted | - |
-| 11 | out_dhcp4 | udp 68 -> 67 | accept | - |
-| 12 | out_router_icmp | icmp echo-request -> router4 | accept | - |
-| 13 | out_router_admin | ip . tcp port in router_admin4 | accept + log | HFW-OUT-ROUTER-ADMIN |
-| 14 | out_lan_allow | ip . proto . port in lan_allow4 | accept + log | HFW-OUT-LAN-ALLOW |
-| 15 | out_ndp6 | icmpv6 RS, NS, NA, MLDv2 report | accept | - |
-| 16 | out_lan | daddr private / link-local / CGNAT / multicast / broadcast | deny | HFW-OUT-LAN |
-| 17 | out_leak | anything else on uplink | deny | HFW-OUT-LEAK |
+| 11 | out_vpn_api | uid 0 tcp 443 -> vpn_api4 | accept, counted | - |
+| 12 | out_dhcp4 | udp 68 -> 67 | accept | - |
+| 13 | out_router_icmp | icmp echo-request -> router4 | accept | - |
+| 14 | out_router_admin | ip . tcp port in router_admin4 | accept + log | HFW-OUT-ROUTER-ADMIN |
+| 15 | out_lan_allow | ip . proto . port in lan_allow4 | accept + log | HFW-OUT-LAN-ALLOW |
+| 16 | out_ndp6 | icmpv6 RS, NS, NA, MLDv2 report | accept | - |
+| 17 | out_lan | daddr private / link-local / CGNAT / multicast / broadcast | deny | HFW-OUT-LAN |
+| 18 | out_leak | anything else on uplink | deny | HFW-OUT-LEAK |
 
 `out_wg`: the Mullvad daemon sets mark 0x6d6f6c65 on the relay transport (setting a
-mark needs CAP_NET_ADMIN). Its API calls outside the tunnel have no mark: out_leak. Split tunneling
+mark needs CAP_NET_ADMIN). Its API calls outside the tunnel have no mark: `out_vpn_api`
+allows them the way `inet mullvad` does (uid 0, tcp 443, one address), nothing else. Split tunneling
 (`mullvad-exclude`) sets the same mark plus ct mark 0xf41 -> not accepted here, ends in
 out_lan / out_leak (not used on this host).
 

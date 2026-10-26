@@ -156,3 +156,9 @@ Counters reset every boot -> use `hostfw report` (reads kernel journal).
   lines (wrong tunnel name, not a leak).
 - Proton leftovers found: host route 80.79.6.83 in wifi profile <wifi profile>, three
   in <wifi profile> (ipv4.routes), keyring item 'proton-sso-accounts' on 'Proton'.
+- Mullvad's own output chain while disconnected: only `ip daddr 45.83.223.196 tcp dport
+  443 meta skuid 0` outside the tunnel (+ DHCP, NDP, lo). /var/cache/mullvad-vpn has no
+  API address file (api-endpoint.json 9 bytes, relays.json).
+- Added the same exception to hostfw: set vpn_api4, rule out_vpn_api (uid 0, tcp 443).
+  netns test: root to the address -> out_vpn_api; uid 1000 to it, root to another
+  address -> out_leak.
