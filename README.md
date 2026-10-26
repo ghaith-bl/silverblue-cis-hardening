@@ -108,6 +108,7 @@ sudo ostree admin config-diff                    # every /etc change vs. image d
 ## Planned
 
 - USBGuard, lock screen only
+- hostfw: exception for Proton's pre-connect API calls (connect unit only)
 - health-report script
 
 ## Docs

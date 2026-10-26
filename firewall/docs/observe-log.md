@@ -27,7 +27,8 @@ Counters reset every boot -> use `hostfw report` (reads kernel journal).
 - CLI connect: proton0 + pvpnksintrf0 back
 
 ## Open
-- connect after long offline (expired cert / stale list) in enforce
+- connect with a too old server list in enforce: happened 2026-10-26 (section below).
+  Escape hatch in firewall/README.md. Planned: exception for the connect unit only.
 
 ## 2026-10-19 probe exception
 - proton_entry4 (908 EntryIPs) + proton_probe_tcp (443,7770,8443) filled by `hostfw sync`.
@@ -105,3 +106,20 @@ Counters reset every boot -> use `hostfw report` (reads kernel journal).
 - Journal 1.5G -> 1.7G. out_new = 0.8% of entries (boot 2026-10-19 17:09: 3440 of 433116).
   93% = audit records (402826) from sectop polling as root (rule root_cmds). Fix in sectop
   (fewer commands, then privilege split). journald cap unchanged. Closed.
+
+## 2026-10-26 enforce: connect fails, server list too old
+- protonvpn-connect.service: 7 tries 12:08-12:35, each "Server list is outdated,
+  updating..." then "Connection failed" / "Network connectivity issues detected".
+  11:50: proton0 up, handshake never, transport to pvpnksintrf0 dropped. Later Proton
+  fully disconnected (no proton0, default via wlo1) -> enforce = no internet. No leak.
+- Pre-connect the CLI refreshes the server list from the Proton API outside the tunnel:
+  system DNS blocked (out_dns), then its fallbacks tcp/443 uid 1000 to public DoH
+  (8.8.x, 9.9.x, 149.112.x) and to fronts (3.75.x.x) -> OUT-LEAK, rejected. Before
+  2026-10-26 it connected from the cached list and refreshed via the tunnel; this time
+  the cache was too old to connect with -> deadlock.
+- Not the cause: wg_fwmark 0xea13b2c the whole day (dispatcher log), sectop posture
+  (read-only).
+- Fix now: `sudo hostfw observe` (12:39) -> next try connected in 33 s (PL-FREE#2) ->
+  `sudo hostfw enforce` + `confirm` after connect: fine.
+- Planned: allow tcp/443 on the uplink only for the connect unit's cgroup, only while it
+  runs (design first: user cgroups are writable by the user).

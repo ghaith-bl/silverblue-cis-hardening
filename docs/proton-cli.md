@@ -19,3 +19,6 @@ Key fingerprint (Fedora 44): 6929 133B DE1C E1CF A9ED B286 D841 76F6 8448 30D4
     flatpak uninstall --unused
 
 Fedora rebase: check Proton repo exists for new release, verify new key fingerprint once.
+
+Connect fails in enforce with "Server list is outdated": escape hatch in
+firewall/README.md (Proton connect at login).

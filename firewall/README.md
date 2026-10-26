@@ -197,6 +197,17 @@ systemctl --user status protonvpn-connect.service     # waiting: activating (sta
 systemctl --user stop protonvpn-connect.service       # no auto connect this login
 ```
 
+Connect fails in enforce, journal repeats "Server list is outdated" (2026-10-26: the
+cached list was too old, and enforce blocks the refresh before the tunnel is up):
+
+```bash
+journalctl --user -u protonvpn-connect -b --no-pager | tail -20
+sudo hostfw observe                  # log only; the Proton kill switch still routes
+protonvpn connect                    # refreshes the list, connects
+sudo hostfw enforce                  # 3 min rollback to observe
+sudo hostfw confirm                  # only if the internet works via the tunnel
+```
+
 ## Known limits
 
 - netfilter has no program names: UID only (Flatpak apps, pasta = 1000; WireGuard, NM, chronyd = 0)
@@ -207,6 +218,8 @@ systemctl --user stop protonvpn-connect.service       # no auto connect this log
   (wg retries every 5 s) -> verify after install
 - dispatcher runs nft from the NM dispatcher SELinux domain -> after first reconnect:
   `sudo ausearch -m avc -ts recent | grep -i hostfw`
+- Proton refreshes its server list outside the tunnel before connecting -> rejected in
+  enforce; a too old cached list = no connect (escape hatch above)
 - L2 (ARP) not covered by `inet` table
 - new libvirt network / rootful containers -> add the bridge to `if_vm` + `if_trusted`
 - `lan_allow4` needs static IPs (router DHCP reservation)
