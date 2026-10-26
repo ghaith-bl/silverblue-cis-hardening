@@ -58,7 +58,8 @@
   transport hits the dummy. Mullvad's kill switch is an nftables table, its routing uses
   a mark: no host route to lose (2026-10-26).
 - A VPN client that needs its API before the tunnel is up needs a way out of an egress
-  filter: Mullvad marks those calls (privileged), Proton did not (2026-10-26).
+  filter. Check it on the host, not from the docs: Mullvad marks only the relay
+  transport, its API calls go out as uid 0 without the mark (2026-10-26).
 
 ## sysctl
 

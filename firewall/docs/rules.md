@@ -55,8 +55,8 @@ rate limit   10/min burst 20 per rule (noise: 6/min burst 10) -> counters are ex
 | 16 | out_lan | daddr private / link-local / CGNAT / multicast / broadcast | deny | HFW-OUT-LAN |
 | 17 | out_leak | anything else on uplink | deny | HFW-OUT-LEAK |
 
-`out_wg`: the Mullvad daemon sets mark 0x6d6f6c65 on the relay transport and on its
-own API calls outside the tunnel (setting a mark needs CAP_NET_ADMIN). Split tunneling
+`out_wg`: the Mullvad daemon sets mark 0x6d6f6c65 on the relay transport (setting a
+mark needs CAP_NET_ADMIN). Its API calls outside the tunnel have no mark: out_leak. Split tunneling
 (`mullvad-exclude`) sets the same mark plus ct mark 0xf41 -> not accepted here, ends in
 out_lan / out_leak (not used on this host).
 

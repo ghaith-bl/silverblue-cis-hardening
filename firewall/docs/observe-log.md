@@ -141,3 +141,18 @@ Counters reset every boot -> use `hostfw report` (reads kernel journal).
   dummy (if_killsw, out_ks, fwd_vm_ks), pre-connect probes (proton_entry4,
   proton_probe_tcp, out_probe). Tested in a netns: mark -> out_wg; no mark, other mark,
   ct mark 0xf41 + mark -> out_leak (rejected in enforce).
+
+## 2026-10-26 23:2x - 23:35: enforce test, reboot on Mullvad
+- Enforce test: browsing, curl via the tunnel fine; `curl --interface wlo1` rejected.
+- `mullvad disconnect` + `relay update`: API calls uid 0 tcp/443 to 217.138.213.18 on wlo1
+  without the mark -> OUT-LEAK, then DoH fallbacks (9.9.9.9, 1.1.1.1, 1.0.0.1,
+  149.112.112.112). out_wg grew by 2 only (transport). The docs claim "API carries the
+  mark" was wrong (mine, from Mullvad docs/security.md, not checked on the host).
+- Reboot 23:32, boot mode enforce: 18 OUT-LEAK this boot, all uid 0 (daemon API
+  45.83.223.196 + DoH fallbacks, ICMP TTL=1 to relays), all rejected. No uid 1000 line
+  outside the tunnel. DNS uid 990 to 192.168.8.1 on wlo1 -> OUT-DNS, rejected (the wifi
+  profile still hands resolved the router as DNS server).
+- sectop still on Proton then: showed "proton0 down" and context "tunnel down" for these
+  lines (wrong tunnel name, not a leak).
+- Proton leftovers found: host route 80.79.6.83 in wifi profile <wifi profile>, three
+  in <wifi profile> (ipv4.routes), keyring item 'proton-sso-accounts' on 'Proton'.

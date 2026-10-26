@@ -10,7 +10,7 @@ Own nftables table `inet hostfw`, next to firewalld. Zero trust LAN: router only
   forward), kept while disconnected by lockdown mode. A second, independent layer:
   hostfw does not rely on it and never edits it
 - Mullvad routing: `ip rule 32765: not fwmark 0x6d6f6c65 lookup 1836018789` (= 0x6d6f6c65)
-  -> everything else via wg0-mullvad; marked traffic (relay transport, daemon API) via wlo1
+  -> everything else via wg0-mullvad; marked traffic (relay transport) via wlo1
 - `ip rule 32764: lookup main suppress_prefixlength 0` -> non-default routes in main win
   -> LAN (192.168.8.0/24) routed outside the tunnel (Mullvad blocks it while Allow LAN
   is off, hostfw blocks it too: out_lan)
@@ -108,7 +108,7 @@ journalctl -k -f -g '^HFW-'         # live
 Watch for:
 
 - `HFW-OUT-LEAK` with `MARK=` and no uid -> WireGuard mark mismatch -> `sync`, check `wg show wg0-mullvad fwmark`
-- `HFW-OUT-LEAK` from uid 0 tcp/443 before connect -> Mullvad API without the mark?
+- `HFW-OUT-LEAK` from uid 0 tcp/443 while not connected -> Mullvad API (no mark, docs/mullvad.md)
 - `HFW-OUT-LEAK` from uid 1000 -> program around the tunnel (or split tunneling)
 - `HFW-OUT-DNS` -> app with hardcoded resolver (inside tunnel = not a leak, still bypasses resolved)
 - `HFW-OUT-LAN` udp 547 -> ff02::1:2 -> NM DHCPv6 solicit (expected, router uses SLAAC)
@@ -183,8 +183,9 @@ sudo firewall-cmd --reload          # revert runtime firewalld cleanup
 
 Setup, settings and how it fits hostfw: [../docs/mullvad.md](../docs/mullvad.md).
 
-- connect: mullvad-daemon (system unit, auto-connect, lockdown) - no hostfw exception:
-  its API calls outside the tunnel carry the mark (`out_wg`)
+- connect: mullvad-daemon (system unit, auto-connect, lockdown). Relay transport has the
+  mark (`out_wg`); its API calls outside the tunnel do not (out_leak, rejected; connect
+  works from the cached relay list)
 - DNS content blockers on -> other resolver address -> add it to `vpn_dns4` first
   (`resolvectl dns wg0-mullvad`)
 - router web UI: `hostfw router-open` + `mullvad lan set allow` for the time, then `block`

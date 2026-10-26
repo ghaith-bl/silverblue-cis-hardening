@@ -44,9 +44,15 @@ Not used: split tunneling, custom DNS, DNS content blockers, Allow LAN.
 | kill switch | table `inet mullvad`, policy drop in / out / forward | not touched |
 | split tunneling | ct mark 0xf41 + mark 0x6d6f6c65 | not accepted -> out_leak |
 
-- Relay transport and the daemon's own API calls outside the tunnel carry the mark (only
-  privileged processes can set it, Mullvad docs/security.md) -> no pre-connect exception,
-  unlike Proton.
+- Relay transport carries the mark (only privileged processes can set it, Mullvad
+  docs/security.md) -> out_wg.
+- The daemon's API calls outside the tunnel do NOT carry the mark (host 2026-10-26: uid 0
+  tcp/443 to 45.83.223.196 and 217.138.213.18, then DoH fallbacks 1.1.1.1 1.0.0.1
+  9.9.9.9 149.112.112.112) -> out_leak, rejected in enforce. Connect still works (cached
+  relay list); inside the tunnel the API is allowed (out_new). Exception: open, after
+  reading Mullvad's own rule for it.
+- ICMP echo TTL=1 to the relay on wlo1, uid 0, no mark (before / at connect): rejected,
+  connect not affected.
 - `inet mullvad` and `inet hostfw` both filter: a packet leaves only if both accept.
 - DNS content blockers change the resolver address: add the new one to `vpn_dns4` before
   turning them on (`resolvectl dns wg0-mullvad`).
