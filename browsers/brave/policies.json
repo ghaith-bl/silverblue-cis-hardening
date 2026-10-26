@@ -92,7 +92,6 @@
 
   "ExtensionInstallBlocklist": ["*"],
   "ExtensionInstallAllowlist": [
-    "jplgfhpmjnbigmhklmmbgecoobifkmpa",
     "cofdbpoegempjloogbagkncekinflcnj"
   ]
 }

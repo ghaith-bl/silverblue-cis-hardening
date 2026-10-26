@@ -60,7 +60,7 @@ Brave per-profile leftovers (Brave must be closed):
 | Browser | Profile | Role | Kept as-is by the policy |
 |---|---|---|---|
 | Brave | personal | my accounts, trusted sites only | cookies kept (no clear-on-exit), DeepL extension |
-| Brave | private | everything else | Proton VPN extension, forget site data when the tab closes, its own Shields settings, reopens last tabs on start (URLs only - site data is still forgotten) |
+| Brave | private | everything else | forget site data when the tab closes, its own Shields settings, reopens last tabs on start (URLs only - site data is still forgotten) |
 | Brave | others | unused | get the policy floor only |
 | Firefox | original / personal / work | — | not changed: settings live in each profile; one `<name>.user.js` export per profile. personal/work come from the Firefox 136+ profile manager (`Profile Groups/*.sqlite`), not `profiles.ini` |
 
@@ -139,7 +139,7 @@ Same intent in both browsers.
 | Search | engine left per profile, suggestions off | per profile | both Brave Search and DuckDuckGo are private; nothing is typed-ahead to a server |
 | Prefetch / speculative connections | off | off | |
 | Safe Browsing | **Standard** (1) + block malicious downloads | **on**, remote download lookups off | see deviations |
-| Extensions | all blocked unless allow-listed (Proton VPN for private, DeepL for personal) | install only from addons.mozilla.org | `install-policies.sh` refuses to install the Brave file while an installed extension is missing from the allowlist (`--force` to accept) |
+| Extensions | all blocked unless allow-listed (DeepL for personal; Proton VPN removed 2026-10-26) | install only from addons.mozilla.org | `install-policies.sh` refuses to install the Brave file while an installed extension is missing from the allowlist (`--force` to accept) |
 | DevTools | `0` = allowed, except on policy-installed extensions | default | |
 
 ## Deviations from CIS (Chrome / Firefox benchmarks)
