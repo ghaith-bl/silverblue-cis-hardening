@@ -2,7 +2,7 @@
 # =============================================================================
 # harden-workstation.sh
 # CIS Fedora Benchmark L2 (Workstation) — tailored for:
-#   Fedora Silverblue 44 · KVM/libvirt · Steam (Flatpak) · ProtonVPN (WireGuard)
+#   Fedora Silverblue 44, KVM/libvirt, Steam (Flatpak), Mullvad VPN (WireGuard)
 #
 # Usage:
 #   ./harden-workstation.sh --list                 show sections
@@ -16,7 +16,7 @@
 #   - overlay module blacklist  -> Silverblue composefs, podman/toolbox
 #   - XWayland disabled         -> Steam client and most games run on X11
 #   - ip_forward = 0 / remove dnsmasq -> libvirt NAT network for KVM, rootful podman
-#   - rp_filter = 1 (strict)    -> can drop ProtonVPN WireGuard traffic (using 2)
+#   - rp_filter = 1 (strict)    -> can drop WireGuard VPN traffic (using 2)
 #   - forced password expiry    -> NIST SP 800-63B advises against it
 #   - auditd HALT               -> a full disk would halt the laptop
 #   - auditd KEEP_LOGS          -> no limit, /var also holds /var/home (ROTATE, 40 x 32 MiB)
@@ -123,7 +123,7 @@ net.ipv4.conf.all.accept_source_route = 0
 net.ipv4.conf.default.accept_source_route = 0
 net.ipv4.conf.all.log_martians = 1
 net.ipv4.conf.default.log_martians = 1
-# 2 = loose mode. CIS asks for 1 (strict), which can drop WireGuard (ProtonVPN) traffic.
+# 2 = loose mode. CIS asks for 1 (strict), which can drop WireGuard (VPN) traffic.
 net.ipv4.conf.all.rp_filter = 2
 net.ipv4.conf.default.rp_filter = 2
 net.ipv4.icmp_echo_ignore_broadcasts = 1
@@ -313,7 +313,7 @@ sec_services() {
   if [[ $DISABLE_AVAHI == yes ]]; then mask_units avahi-daemon.socket avahi-daemon.service; fi
   if [[ $DISABLE_BLUETOOTH == yes ]]; then mask_units bluetooth.service; fi
   # nftables.service must NOT be stopped live: its stop action flushes the whole
-  # ruleset (firewalld + ProtonVPN kill switch). Disable + mask only.
+  # ruleset (firewalld, hostfw, Mullvad kill switch). Disable + mask only.
   if unit_exists nftables.service; then
     systemctl disable nftables.service >/dev/null 2>&1 || true
     systemctl mask nftables.service >/dev/null 2>&1 && log "nftables.service masked (firewalld manages nftables)"

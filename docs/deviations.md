@@ -54,14 +54,12 @@ Input for an OpenSCAP tailoring file.
 | `sshd_*` | sshd is masked; hardened drop-in present | `systemctl is-enabled sshd` → `masked` |
 | ~17 `audit_rules_*` | rules loaded, different text format than the scanner regex | `sudo auditctl -l`, `ausearch -k <key>` |
 
-## Proton VPN CLI
-- me.proton.vpn.split_tunneling.service masked (eBPF, unused).
-- me.proton.vpn.kill_switch D-Bus service runs as root, no systemd sandboxing.
-  Not used by kill-switch "standard" (routing only). Re-check if "permanent" ships.
-- Kill switch "standard" is not applied at boot. hostfw adapts to it.
-- CLI does not connect at boot. Boot -> login covered by hostfw boot mode enforce
-  (2026-10-19): no internet outside the tunnel before connect.
-- Connect at login via user unit protonvpn-connect.service (firewall/proton/),
-  not at boot: CLI auth is per user. Waits for wifi / ethernet before the first try
-  (protonvpn-wait-uplink), then retries 15 s doubling to 4 min (2026-10-25).
+## Mullvad VPN (replaced Proton VPN 2026-10-26, docs/mullvad.md)
+- mullvad-daemon runs as root (owns its nftables table, routes, DNS). Package unit,
+  not changed.
+- Management socket: any local user can talk to the daemon (connect, disconnect,
+  settings). Single-user laptop; planned: limit it to one group.
+- The RPM ships the GUI too (one package). Not started, no autostart.
+- Lockdown mode + hostfw boot mode enforce: no internet outside the tunnel from boot,
+  also while disconnected.
 - hostfw observe week ended after 1 day (2026-10-19). Findings: firewall/docs/observe-log.md.

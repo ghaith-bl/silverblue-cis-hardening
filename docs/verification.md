@@ -6,7 +6,7 @@ Tests run after hardening + reboot. All passed.
 
 | Check | Command | Result |
 |-------|---------|--------|
-| VPN + kill switch | disconnect VPN, `ping -c 3 archlinux.org` | no connectivity (expected) |
+| VPN + kill switch | `mullvad disconnect`, `ping -c 3 archlinux.org` (then `mullvad connect`) | no connectivity (lockdown, expected) |
 | VPN connected | `ping -c 3 archlinux.org` | 0% loss |
 | VM SSH | `ssh toolkit-lab` | OK |
 | VM internet | `curl -sI https://archlinux.org` | `HTTP/2 200` |

@@ -53,6 +53,12 @@
 - NetworkManager handles IPv6 RA in userspace → `accept_ra = 0` is safe.
 - NetworkManager sets `rp_filter = 2` itself on multihomed hosts → strict `1` is not worth it with a VPN.
 - VM traffic goes through the host → with the kill switch active, VMs have no internet either (expected).
+- A routing kill switch (Proton: dummy default route + host route to the server) breaks
+  when DHCP restarts on wifi roaming (router band steering): the host route goes away,
+  transport hits the dummy. Mullvad's kill switch is an nftables table, its routing uses
+  a mark: no host route to lose (2026-10-26).
+- A VPN client that needs its API before the tunnel is up needs a way out of an egress
+  filter: Mullvad marks those calls (privileged), Proton did not (2026-10-26).
 
 ## sysctl
 

@@ -60,3 +60,30 @@ Not used: split tunneling, custom DNS, DNS content blockers, Allow LAN.
     sudo nft list chain inet mullvad output | head -3     # policy drop
     resolvectl dns wg0-mullvad             # 10.64.0.1
     sudo hostfw status                     # wg_fwmark 0x6d6f6c65
+
+## Proton VPN removed (2026-10-26)
+
+Why: drops on wifi roaming (routing kill switch lost its host route on every DHCP
+restart), pre-connect API calls outside the tunnel deadlocked with hostfw enforce.
+
+    systemctl --user disable --now protonvpn-connect.service
+    protonvpn signout                       # ends the session, removes stored login
+    rm ~/.config/systemd/user/protonvpn-connect.service ~/.local/bin/protonvpn-wait-uplink
+    systemctl --user daemon-reload
+    sudo systemctl unmask me.proton.vpn.split_tunneling.service
+    rpm-ostree uninstall proton-vpn-cli protonvpn-stable-release   # + its python3-proton-*, proton-vpn-daemon
+    systemctl reboot
+    rpm-ostree cleanup -m                   # cached repo metadata
+    rm -rf ~/.cache/Proton ~/.config/Proton
+    sudo rm /var/lib/hostfw/proton_probe    # hostfw state of the removed probe sets
+
+Repo: firewall/proton/ (connect unit + uplink wait), docs/proton-cli.md, hostfw Proton
+sets / counters removed.
+
+Checks (all empty):
+
+    rpm -qa | grep -i proton
+    ls /etc/yum.repos.d/ | grep -i proton
+    nmcli -g NAME connection show | grep -iE 'proton|pvpn'
+    ip -br link | grep -iE 'proton|pvpn'
+    sudo ostree admin config-diff | grep -i proton
