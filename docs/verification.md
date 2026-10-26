@@ -34,4 +34,9 @@ Tests run after hardening + reboot. All passed.
 | sudo log | `sudo tail -3 /var/log/sudo.log` | recent commands |
 | microphone off | `wpctl status` | `Sources:` empty |
 | no exposed listeners | `sudo ss -tulpn` | only localhost / `virbr0` / WireGuard |
+| Secure Boot | `mokutil --sb-state` | `SecureBoot enabled` |
+| kernel lockdown | `cat /sys/kernel/security/lockdown` | `[integrity]` |
+| kernel not tainted | `cat /proc/sys/kernel/tainted` | `0` |
+| MOK keys | `mokutil --list-enrolled \| grep -i subject:` | Fedora Secure Boot CA only |
+| modules signed | loop in [secure-boot.md](secure-boot.md) step 5 | no output |
 | unowned / world-writable | `sudo find / -xdev \( -nouser -o -nogroup \)` etc. | none |

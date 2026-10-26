@@ -26,6 +26,24 @@
 - authselect `local` profile is the default since Fedora 40; features: `with-faillock`, `with-pwhistory`, `without-nullok`.
 - `with-fingerprint` enabled without a reader + faillock → risk of fast lockouts. Disable it first.
 
+## Secure Boot / kernel modules
+
+- A local MOK key (akmods) has its private key on the same disk: root can sign any module
+  and the kernel loads it with Secure Boot on. No local key = only Fedora-signed modules.
+- An out-of-tree module taints the kernel (`O E`) at the load attempt, even when it fails
+  (`modprobe nvidia`: ENODEV, no GPU).
+- `/etc/pki/akmods` and the first key pair had group 963 = now `systemd-coredump`
+  (`akmods` = 958): that group could read an old private key. Likely the akmods GID
+  moved between deployments (not checked). Check group owners of key files by number.
+- `mokutil --list-delete` as a user printed nothing while a delete request was queued
+  (MokManager showed "Delete MOK"). Check pending requests with `sudo`.
+- `rpm-ostree kargs --delete=KEY=VALUE` removes one entry per flag: a duplicate needs the
+  flag twice. All or nothing: an error stages nothing.
+- `rpm-ostree uninstall` left the enable symlink of a removed unit:
+  `find /etc/systemd/system -xtype l`.
+- Repo files from `fedora-workstation-repositories` (`rpm -qf`): `enabled=0`, not delete.
+- Kernel lockdown (Secure Boot) blocks hibernation; suspend works.
+
 ## Networking
 
 - `nftables.service` `ExecStop` = `nft flush ruleset` → stopping it wipes firewalld, libvirt and the VPN kill switch.

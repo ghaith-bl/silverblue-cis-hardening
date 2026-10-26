@@ -29,6 +29,8 @@ Remaining `fail` items (approx.):
 - KVM/libvirt NAT network (`virbr0`), rootless Podman + kind, toolbox
 - Steam (Flatpak), Proton VPN CLI (RPM, WireGuard), kill switch "standard", connect at login
 - hostfw: own nftables egress filter next to firewalld, enforce from boot
+- Secure Boot on, kernel lockdown `integrity`, only Fedora-signed kernel modules, no NVIDIA
+  driver (dGPU off, supergfxctl `Integrated`) -> [docs/secure-boot.md](docs/secure-boot.md)
 - OpenSCAP 1.4.4, scap-security-guide 0.1.82
 
 ## Usage
@@ -106,13 +108,13 @@ sudo ostree admin config-diff                    # every /etc change vs. image d
 ## Planned
 
 - USBGuard, lock screen only
-- remove akmod-nvidia, then Secure Boot
 - health-report script
 
 ## Docs
 
 - [docs/deviations.md](docs/deviations.md) — what was not applied and why
 - [docs/verification.md](docs/verification.md) — tests run after hardening
+- [docs/secure-boot.md](docs/secure-boot.md) - Secure Boot on, NVIDIA driver removed
 - [docs/lessons-learned.md](docs/lessons-learned.md) — findings worth remembering
 - [firewall/README.md](firewall/README.md) — hostfw egress filter: design, rules, tests
 - [firewall/docs/observe-log.md](firewall/docs/observe-log.md) — observe findings, changes, tests
