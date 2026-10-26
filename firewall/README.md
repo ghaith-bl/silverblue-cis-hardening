@@ -6,14 +6,15 @@ Own nftables table `inet hostfw`, next to firewalld. Zero trust LAN: router only
 ## Why
 
 - firewalld zones = ingress only. no HOST -> zone policies -> egress unfiltered
-- ProtonVPN kill switch = routing, not a packet filter:
-  - `pvpnksintrf0` / `pvpnksintrf1` dummy (index varies by client), default route metric 98 (blackhole)
-  - `<endpoint> via <router> dev wlo1` host route for the VPN server
-  - `ip rule 31505: not fwmark 0xea13b2c lookup <wg table>` -> everything else via proton0
-- `ip rule 31504: lookup main suppress_prefixlength 0` -> non-default routes in main win
-  -> LAN (192.168.8.0/24) reachable from host and VMs, outside the tunnel
-- IPv6: no global addr on wlo1, none in tunnel, v6 default -> dummy. no v6 internet leak,
-  but ULA / link-local LAN open both ways
+- Mullvad kill switch = own nftables table `inet mullvad` (policy drop on input, output,
+  forward), kept while disconnected by lockdown mode. A second, independent layer:
+  hostfw does not rely on it and never edits it
+- Mullvad routing: `ip rule 32765: not fwmark 0x6d6f6c65 lookup 1836018789` (= 0x6d6f6c65)
+  -> everything else via wg0-mullvad; marked traffic (relay transport, daemon API) via wlo1
+- `ip rule 32764: lookup main suppress_prefixlength 0` -> non-default routes in main win
+  -> LAN (192.168.8.0/24) routed outside the tunnel (Mullvad blocks it while Allow LAN
+  is off, hostfw blocks it too: out_lan)
+- IPv6: no global addr on wlo1 -> no v6 internet leak, but ULA / link-local LAN open both ways
 - rootless Podman / kind: traffic = host output from `pasta` (no host bridge, no container IPs)
 
 ## Layers
@@ -22,8 +23,8 @@ Own nftables table `inet hostfw`, next to firewalld. Zero trust LAN: router only
 |---|---|---|
 | `inet firewalld` | firewalld | ingress (zones: drop, libvirt) |
 | `inet hostfw` | this repo | egress, forward, inbound logging |
+| `inet mullvad` | mullvad-daemon | kill switch (lockdown), DNS, relay transport, split tunnel marks |
 | `ip/ip6 libvirt_network` | libvirt | VM NAT / forward |
-| `ip nm-wg-proton0` | NetworkManager | WireGuard anti-spoof + fwmark |
 
 - separate base chains on the same hook all run. drop/reject = final. accept = next table decides
 - -> hostfw can only tighten, never open a hole
@@ -36,10 +37,8 @@ hostfw.nft                    ruleset (sets, counters, chains)
 hostfw.sh                     apply | observe | enforce | confirm | sync | router-open
                               status | counters | report | remove | install | uninstall
 hostfw.service                boot unit (own unit - not nftables.service)
-nm-dispatcher/90-hostfw-sync  re-sync wg_fwmark + router4 on VPN / network up
+nm-dispatcher/90-hostfw-sync  re-sync router4 (+ wg_fwmark while the tunnel is up) on network up
 firewalld-cleanup.sh          drop-zone legacy rich rules (runtime, then --permanent)
-proton/protonvpn-connect.service  user unit: connect at login, once wifi / ethernet is up
-proton/protonvpn-wait-uplink  its ExecStartPre (nm-online + device state)
 docs/rules.md                 every rule, prefix, counter (sectop contract)
 ```
 
@@ -57,7 +56,6 @@ Installed paths:
 
 - observe: denied traffic counted + logged, still passes
 - enforce: denied traffic rejected (`icmpx admin-prohibited`, apps fail fast)
-- kill switch hits (`HFW-OUT-KS`, `HFW-FWD-VM-KS`): always dropped
 - new flows via tunnel (`HFW-OUT-NEW`, `HFW-FWD-VM-NEW`): allowed, logged (audit, sectop)
 - switch = flush/add one rule in chain `enforce`. live, atomic, no reload
 
@@ -67,7 +65,7 @@ Installed paths:
 
 ```bash
 sudo nft list tables                # no stale "inet hostfw"
-sudo wg show proton0 fwmark         # VPN connected
+sudo wg show wg0-mullvad fwmark     # VPN connected: 0x6d6f6c65
 ```
 
 ### 1. firewalld cleanup (runtime)
@@ -85,16 +83,15 @@ sudo ./hostfw.sh confirm            # keep it (else table deleted after 5 min)
 ```
 
 - lost on reboot (runtime only)
-- after VPN reconnect / server change / new network: `sudo ./hostfw.sh sync`
-  (dispatcher does this automatically once installed)
+- new network: `sudo ./hostfw.sh sync` (dispatcher does this automatically once installed)
 
 ### 3. coexistence checks
 
 ```bash
 sudo firewall-cmd --reload && sudo nft list table inet hostfw >/dev/null && echo survives-firewalld-reload
 sudo virsh net-destroy default && sudo virsh net-start default && sudo nft list table inet hostfw >/dev/null && echo survives-libvirt
-# VPN: disconnect / connect other server, then:
-sudo ./hostfw.sh sync && sudo ./hostfw.sh status
+# VPN: mullvad reconnect, then:
+sudo ./hostfw.sh status
 ```
 
 - firewalld reload reverts step 1 runtime changes -> rerun cleanup if needed
@@ -110,14 +107,14 @@ journalctl -k -f -g '^HFW-'         # live
 
 Watch for:
 
-- `HFW-OUT-LEAK` udp from uid 0 -> WireGuard mark mismatch -> `sync`, check fwmark changes
-- `HFW-OUT-LEAK` from uid 1000 before VPN connects -> protonvpn-app API outside tunnel?
+- `HFW-OUT-LEAK` with `MARK=` and no uid -> WireGuard mark mismatch -> `sync`, check `wg show wg0-mullvad fwmark`
+- `HFW-OUT-LEAK` from uid 0 tcp/443 before connect -> Mullvad API without the mark?
+- `HFW-OUT-LEAK` from uid 1000 -> program around the tunnel (or split tunneling)
 - `HFW-OUT-DNS` -> app with hardcoded resolver (inside tunnel = not a leak, still bypasses resolved)
 - `HFW-OUT-LAN` udp 547 -> ff02::1:2 -> NM DHCPv6 solicit (expected, router uses SLAAC)
 - `HFW-OUT-LAN` IGMP -> multicast membership reports (expected, MLDv2 allowed for NDP)
 - `HFW-OUT-DISCO` brave / steam -> expected, keep blocked
 - `HFW-IN-LAN` -> who on the LAN tries to reach me
-- `HFW-OUT-KS` -> app traffic while tunnel down
 - `HFW-OUT-NEW` -> every new flow via tunnel (allowed): who talks to what. Not in report top flows
 
 Decide exceptions from data, not guesses.
@@ -146,13 +143,13 @@ Positive - must work:
 ```bash
 curl -sI https://fedoraproject.org | head -1
 sudo hostfw counters | grep -E 'out_new|fwd_vm_new'     # out_new grows with new flows
-journalctl -k -n 3 --no-pager -g '^HFW-OUT-NEW'          # UID=1000, OUT=proton0
+journalctl -k -n 3 --no-pager -g '^HFW-OUT-NEW'          # UID=1000, OUT=wg0-mullvad
 ping -c1 "$(ip -4 route show default dev wlo1 | awk '{print $3; exit}')"
 sudo virsh start <vm>; ssh <vm>           # VM: curl -sI https://fedoraproject.org
 podman run --rm registry.fedoraproject.org/fedora-minimal curl -sI https://fedoraproject.org
 kubectl get nodes                          # kind
 # Steam offline game, Brave, Firefox
-# VPN disconnect -> connect other server -> sync (or dispatcher) -> browse
+# mullvad reconnect -> browse; mullvad relay update while disconnected -> out_wg grows, no OUT-LEAK
 ```
 
 Negative - must fail fast + log (`dig` from toolbox, shares host netns):
@@ -182,44 +179,28 @@ sudo ./hostfw.sh uninstall          # unit + dispatcher + /usr/local/sbin/hostfw
 sudo firewall-cmd --reload          # revert runtime firewalld cleanup
 ```
 
-## Proton connect at login (user unit)
+## VPN: Mullvad
 
-No connect attempt while offline: the unit waits until a wifi / ethernet device is
-connected, then runs `protonvpn connect`. A failed connect with the uplink up retries
-after 15 s, doubling to 4 min (15 30 60 120 240).
+Setup, settings and how it fits hostfw: [../docs/mullvad.md](../docs/mullvad.md).
 
-```bash
-install -D -m 0755 proton/protonvpn-wait-uplink ~/.local/bin/protonvpn-wait-uplink
-install -D -m 0644 proton/protonvpn-connect.service ~/.config/systemd/user/protonvpn-connect.service
-systemctl --user daemon-reload
-systemctl --user enable protonvpn-connect.service
-systemctl --user status protonvpn-connect.service     # waiting: activating (start-pre)
-systemctl --user stop protonvpn-connect.service       # no auto connect this login
-```
-
-Connect fails in enforce, journal repeats "Server list is outdated" (2026-10-26: the
-cached list was too old, and enforce blocks the refresh before the tunnel is up):
-
-```bash
-journalctl --user -u protonvpn-connect -b --no-pager | tail -20
-sudo hostfw observe                  # log only; the Proton kill switch still routes
-protonvpn connect                    # refreshes the list, connects
-sudo hostfw enforce                  # 3 min rollback to observe
-sudo hostfw confirm                  # only if the internet works via the tunnel
-```
+- connect: mullvad-daemon (system unit, auto-connect, lockdown) - no hostfw exception:
+  its API calls outside the tunnel carry the mark (`out_wg`)
+- DNS content blockers on -> other resolver address -> add it to `vpn_dns4` first
+  (`resolvectl dns wg0-mullvad`)
+- router web UI: `hostfw router-open` + `mullvad lan set allow` for the time, then `block`
 
 ## Known limits
 
-- netfilter has no program names: UID only (Flatpak apps, pasta = 1000; WireGuard, NM, chronyd = 0)
+- netfilter has no program names: UID only (Flatpak apps, pasta = 1000; chronyd 994,
+  systemd-resolved 990; mullvad-daemon, NM = 0; kernel WireGuard transport: no uid)
 - logs rate-limited -> counters exact, logs = samples (*-NEW: 5/s burst 50)
 - *-NEW = allowed flows, logged only: no per-program control (netfilter has no program names)
 - table reload (`apply`, `systemctl reload`) resets counters + router-open entries
-- boot in enforce: WireGuard handshake rejected until dispatcher syncs `wg_fwmark` on proton0 up
-  (wg retries every 5 s) -> verify after install
+- `wg_fwmark` ships Mullvad's mark: boot in enforce connects without a sync. A changed
+  mark (new Mullvad release) = OUT-LEAK with `MARK=` until `sync` with the tunnel up
 - dispatcher runs nft from the NM dispatcher SELinux domain -> after first reconnect:
   `sudo ausearch -m avc -ts recent | grep -i hostfw`
-- Proton refreshes its server list outside the tunnel before connecting -> rejected in
-  enforce; a too old cached list = no connect (escape hatch above)
+- split tunneling (`mullvad-exclude`) is blocked by hostfw on purpose (out_leak)
 - L2 (ARP) not covered by `inet` table
 - new libvirt network / rootful containers -> add the bridge to `if_vm` + `if_trusted`
 - `lan_allow4` needs static IPs (router DHCP reservation)
@@ -233,3 +214,5 @@ sudo hostfw confirm                  # only if the internet works via the tunnel
 - firewalld zones / policies / reload: https://firewalld.org/documentation/
 - NetworkManager-dispatcher(8): https://networkmanager.dev/docs/api/latest/NetworkManager-dispatcher.html
 - systemd-run(1), systemd.unit(5)
+- Mullvad app security (tunnel states, firewall marks, API access): https://github.com/mullvad/mullvadvpn-app/blob/master/docs/security.md
+- Mullvad split tunneling marks (ct mark 0xf41, mark 0x6d6f6c65): https://mullvad.net/help/split-tunneling-with-linux-advanced

@@ -17,10 +17,7 @@ DEADLINE_FILE=$RUN_DIR/rollback
 STATE_DIR=/var/lib/hostfw
 MARK_FILE=$STATE_DIR/wg_fwmark
 
-WG_IFACES=${HOSTFW_WG_IFACES:-proton0}
-KS_IFACES=${HOSTFW_KS_IFACES:-pvpnksintrf0 pvpnksintrf1}
-PROTON_UID=1000                  # must match "meta skuid" in hostfw.nft
-PROBE_FILE=$STATE_DIR/proton_probe
+WG_IFACES=${HOSTFW_WG_IFACES:-wg0-mullvad}
 
 SELF=$(readlink -f "${BASH_SOURCE[0]}")
 SELF_DIR=$(dirname "$SELF")
@@ -97,11 +94,11 @@ rollback_pending() { systemctl is-active --quiet "$ROLLBACK.timer"; }
 
 is_excluded_if() {
     local ifc
-    for ifc in $WG_IFACES $KS_IFACES; do [[ $1 == "$ifc" ]] && return 0; done
+    for ifc in $WG_IFACES; do [[ $1 == "$ifc" ]] && return 0; done
     return 1
 }
 
-uplink_gateways() {   # prints "dev gw" for IPv4 default routes not on tunnel/kill switch
+uplink_gateways() {   # prints "dev gw" for IPv4 default routes not on the tunnel
     ip -4 route show default | awk '
         { d = ""; g = ""
           for (i = 1; i < NF; i++) { if ($i == "dev") d = $(i+1); if ($i == "via") g = $(i+1) }
@@ -214,86 +211,14 @@ cmd_confirm() {
     fi
 }
 
-read -r -d '' PY_PROBE <<'PY' || true
-import ipaddress, json, os, sys
-cache, saved, force = sys.argv[1], sys.argv[2], sys.argv[3] == "1"
-MIN_IPS, MAX_IPS, MAX_DELTA = 100, 5000, 0.25
-
-def fail(msg):
-    print(msg); sys.exit(2)
-
-def load(name):
-    fd = os.open(os.path.join(cache, name), os.O_RDONLY | os.O_NOFOLLOW)
-    with os.fdopen(fd) as f:
-        return json.load(f)
-
-try:
-    sl, cc = load("serverlist.json"), load("clientconfig.json")
-except (OSError, ValueError) as e:
-    fail(f"cannot read Proton cache: {e}")
-
-ips = set()
-for ls in sl.get("LogicalServers", []):
-    for s in ls.get("Servers", []):
-        try:
-            ip = ipaddress.IPv4Address(s.get("EntryIP", ""))
-        except ValueError:
-            continue
-        if ip.is_global:
-            ips.add(ip)
-
-ports = cc.get("DefaultPorts", {}).get("OpenVPN", {}).get("TCP", [])
-if not (isinstance(ports, list) and 1 <= len(ports) <= 8
-        and all(type(p) is int and 0 < p < 65536 for p in ports)):
-    fail(f"bad probe ports: {ports!r}")
-if not MIN_IPS <= len(ips) <= MAX_IPS:
-    fail(f"entry IP count out of range: {len(ips)}")
-
-try:
-    with open(saved) as f:
-        old = {ipaddress.IPv4Address(x) for x in f.read().split("\n")[1].split(",") if x}
-except (OSError, IndexError, ValueError):
-    old = set()
-if old and not force and len(ips ^ old) > MAX_DELTA * len(old):
-    fail(f"entry IP change too large: +{len(ips - old)} -{len(old - ips)} of {len(old)} "
-         "(check, then HOSTFW_PROBE_FORCE=1 hostfw sync)")
-
-print(f"{len(ips)} entry IPs (+{len(ips - old)} -{len(old - ips)})")
-print(",".join(str(p) for p in sorted(set(ports))))
-print(",".join(str(i) for i in sorted(ips)))
-PY
-
-sync_proton_probe() {
-    local home cache out msg ports ips
-    home=$(getent passwd "$PROTON_UID" | cut -d: -f6)
-    cache=${HOSTFW_PROTON_CACHE:-$home/.cache/Proton/VPN}
-    if out=$(python3 -I -c "$PY_PROBE" "$cache" "$PROBE_FILE" "${HOSTFW_PROBE_FORCE:-0}"); then
-        { read -r msg; read -r ports; read -r ips; } <<< "$out"
-    else
-        log "proton_probe: $out"
-        [[ -r $PROBE_FILE ]] || { log "proton_probe: no saved list - probes blocked in enforce mode"; return 0; }
-        { read -r ports; read -r ips; } < "$PROBE_FILE"
-        msg="using saved list $PROBE_FILE"
-    fi
-    if [[ ! $ports =~ ^[0-9]+(,[0-9]+)*$ || ! $ips =~ ^[0-9.]+(,[0-9.]+)*$ ]]; then
-        log "proton_probe: invalid list - keeping current sets"; return 0
-    fi
-    "$NFT" -f - <<< "flush set $T proton_probe_tcp
-flush set $T proton_entry4
-add element $T proton_probe_tcp { $ports }
-add element $T proton_entry4 { $ips }" || { log "proton_probe: nft load failed"; return 0; }
-    log "proton_probe: $msg, tcp $ports"
-    { install -d -m 0755 "$STATE_DIR" && printf '%s\n%s\n' "$ports" "$ips" > "$PROBE_FILE.tmp" &&
-        mv -f "$PROBE_FILE.tmp" "$PROBE_FILE"; } 2>/dev/null || log "proton_probe: could not save $PROBE_FILE"
-}
-
 cmd_sync() {
     need_root; need_table
     local ifc mark list saved dev gw
     local marks=()
 
-    # wg_fwmark: the mark is stable across reconnects, so keep the last
-    # known value while the tunnel is down (no empty window on reconnect)
+    # wg_fwmark: hostfw.nft ships Mullvad's mark (0x6d6f6c65, the same on every
+    # connect). Tunnel up: replaced by the live mark; tunnel down: the last live
+    # mark is added (saved), so a changed mark still works before the tunnel is up
     if command -v wg >/dev/null; then
         for ifc in $WG_IFACES; do
             mark=$(wg show "$ifc" fwmark 2>/dev/null || true)
@@ -321,7 +246,7 @@ add element $T wg_fwmark { $list }"
             log "wg_fwmark: ignoring invalid $MARK_FILE"
         fi
     else
-        log "wg_fwmark: none yet (tunnel never seen) - WireGuard blocked on uplink in enforce mode"
+        log "wg_fwmark: tunnel never seen - keeping the ruleset mark (Mullvad 0x6d6f6c65)"
     fi
 
     "$NFT" flush set $T router4
@@ -330,8 +255,6 @@ add element $T wg_fwmark { $list }"
         "$NFT" add element $T router4 "{ $gw }"
         log "router4: $gw ($dev)"
     done < <(uplink_gateways)
-
-    sync_proton_probe
 }
 
 cmd_router_open() {
@@ -458,7 +381,7 @@ hostfw - host egress filter (nftables table inet hostfw)
   enforce [--rollback MIN]   reject denied traffic (default rollback: 3 min,
                              reverts to observe; --no-rollback to skip)
   confirm                    cancel pending rollback, save mode for boot (if installed)
-  sync                       refresh wg_fwmark + router4 + proton probe sets (after VPN reconnect / new network)
+  sync                       refresh wg_fwmark + router4 (new network; NM dispatcher does it)
                              tunnel down: keeps last wg_fwmark (/var/lib/hostfw/wg_fwmark)
   router-open [MIN]          allow router web UI tcp 80,443 for MIN (default 10) minutes
   status                     mode, rollback, sets, counters
@@ -467,8 +390,7 @@ hostfw - host egress filter (nftables table inet hostfw)
   remove                     delete the runtime table
   install / uninstall        boot unit + NM dispatcher (+ /usr/local/sbin/hostfw)
 
-env: HOSTFW_RULESET, HOSTFW_WG_IFACES (proton0), HOSTFW_KS_IFACES (pvpnksintrf0 pvpnksintrf1),
-     HOSTFW_PROTON_CACHE (~uid1000/.cache/Proton/VPN), HOSTFW_PROBE_FORCE=1 (skip change limit once)
+env: HOSTFW_RULESET, HOSTFW_WG_IFACES (wg0-mullvad)
 EOF
 }
 

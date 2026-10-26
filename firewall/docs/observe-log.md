@@ -123,3 +123,21 @@ Counters reset every boot -> use `hostfw report` (reads kernel journal).
   `sudo hostfw enforce` + `confirm` after connect: fine.
 - Planned: allow tcp/443 on the uplink only for the connect unit's cgroup, only while it
   runs (design first: user cgroups are writable by the user).
+
+## 2026-10-26 evening: Proton drops on wifi, switch to Mullvad
+- Proton dropped every few minutes on wifi. ISP router moves the laptop between its
+  5 GHz and 2.4 GHz networks (WNM, beacon loss); each move restarts DHCP on wlo1.
+  21:53:47 HFW-OUT-KS: transport (MARK=0xea13b2c) to the server on pvpnksintrf0 ->
+  the client's host route to the server was gone, transport hit the kill switch dummy.
+  Also with hostfw in observe -> not hostfw.
+- Replaced by Mullvad (mullvad-vpn 2026.5, lockdown + auto-connect, docs/mullvad.md).
+- First Mullvad connect, hostfw still on the Proton ruleset (observe), 22:57:
+  - transport udp 56910 MARK=0x6d6f6c65 on wlo1 -> OUT-LEAK (set had the Proton mark)
+  - DNS uid 990 to 10.64.0.1 via wg0-mullvad -> OUT-DNS (resolver was 10.2.0.1)
+  - every flow via wg0-mullvad -> OUT-LEAK (tunnel not in if_trusted)
+  - daemon API in the tunnel: tcp/443 uid 0 via wg0-mullvad
+- Ruleset moved to Mullvad: if_vpn wg0-mullvad, vpn_dns4 10.64.0.1, wg_fwmark ships
+  0x6d6f6c65, out_wg skips ct mark 0xf41 (split tunneling). Removed: Proton kill switch
+  dummy (if_killsw, out_ks, fwd_vm_ks), pre-connect probes (proton_entry4,
+  proton_probe_tcp, out_probe). Tested in a netns: mark -> out_wg; no mark, other mark,
+  ct mark 0xf41 + mark -> out_leak (rejected in enforce).
