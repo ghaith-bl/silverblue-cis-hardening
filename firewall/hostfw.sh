@@ -16,6 +16,10 @@ RUN_DIR=/run/hostfw
 DEADLINE_FILE=$RUN_DIR/rollback
 STATE_DIR=/var/lib/hostfw
 MARK_FILE=$STATE_DIR/wg_fwmark
+# this machine's addresses (VPN resolver, VPN API): kept out of git
+LOCAL_FILE=${HOSTFW_LOCAL:-$ETC_DIR/local.conf}
+LOCAL_SETS="vpn_dns4 vpn_api4"
+IP4_RE='^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])$'
 
 WG_IFACES=${HOSTFW_WG_IFACES:-wg0-mullvad}
 
@@ -147,6 +151,33 @@ for c in rows:
     print("%-18s %12d %14d  %s" % (c["name"], c["packets"], c["bytes"], c.get("comment", "")))
 PY
 
+# local.conf -> nft commands on stdout; returns 1 (and prints nothing) on any problem.
+# Lines: "<set> <ipv4>[,<ipv4>...]", "#" starts a comment. Every set in LOCAL_SETS needed.
+# Log lines never show the addresses.
+local_cmds() {
+    local file=$1 name rest ip s out="" ips
+    [[ -r $file ]] || { log "local: $file missing" >&2; return 1; }
+    for s in $LOCAL_SETS; do out+="flush set $T $s"$'\n'; done
+    while read -r name rest || [[ -n ${name:-} ]]; do
+        [[ -z ${name:-} || $name == \#* ]] && continue
+        case " $LOCAL_SETS " in
+            *" $name "*) ;;
+            *) log "local: unknown set '$name' in $file" >&2; return 1 ;;
+        esac
+        rest=${rest%%#*}
+        IFS=', ' read -ra ips <<< "$rest"
+        (( ${#ips[@]} )) || { log "local: no address for $name in $file" >&2; return 1; }
+        for ip in "${ips[@]}"; do
+            [[ $ip =~ $IP4_RE ]] || { log "local: invalid address for $name in $file" >&2; return 1; }
+            out+="add element $T $name { $ip }"$'\n'
+        done
+    done < "$file"
+    for s in $LOCAL_SETS; do
+        [[ $out == *"add element $T $s "* ]] || { log "local: $s missing in $file" >&2; return 1; }
+    done
+    printf '%s' "$out"
+}
+
 set_elems() {   # $1 = set name, $2 = "mark" for hex output
     python3 -I -c "$PY_SET" "$("$NFT" -j list set $T "$1")" "${2:-}"
 }
@@ -157,6 +188,8 @@ cmd_apply() {
     need_root
     ROLLBACK_MIN=0; parse_rollback "$@"
     local rs; rs=$(ruleset_path)
+    local_cmds "$LOCAL_FILE" >/dev/null ||
+        die "fix $LOCAL_FILE first (template: firewall/hostfw.local.example)"
     "$NFT" -c -f "$rs" || die "syntax check failed: $rs"
     "$NFT" -f "$rs"
     log "loaded $rs (runtime only, mode: observe)"
@@ -213,8 +246,16 @@ cmd_confirm() {
 
 cmd_sync() {
     need_root; need_table
-    local ifc mark list saved dev gw
+    local ifc mark list saved dev gw cmds
     local marks=()
+
+    # vpn_dns4 + vpn_api4 from local.conf (one transaction: flush + add)
+    if cmds=$(local_cmds "$LOCAL_FILE"); then
+        "$NFT" -f - <<< "$cmds"
+        log "local: vpn_dns4, vpn_api4 loaded from $LOCAL_FILE"
+    else
+        log "WARNING: local.conf not loaded - vpn_dns4 / vpn_api4 unchanged (empty after apply / boot = VPN DNS and VPN API blocked)"
+    fi
 
     # wg_fwmark: hostfw.nft ships Mullvad's mark (0x6d6f6c65, the same on every
     # connect). Tunnel up: replaced by the live mark; tunnel down: the last live
@@ -281,6 +322,9 @@ cmd_status() {
         echo "rollback:      none"
     fi
     echo "installed:     $([[ -f $UNIT_DST ]] && echo yes || echo no)  boot mode: $(cat "$MODE_FILE" 2>/dev/null || echo -)"
+    echo "local.conf:    $(local_cmds "$LOCAL_FILE" >/dev/null 2>&1 && echo ok || echo "MISSING / INVALID ($LOCAL_FILE)")"
+    echo "vpn_dns4:      $(set_elems vpn_dns4)"
+    echo "vpn_api4:      $(set_elems vpn_api4)"
     echo "wg_fwmark:     $(set_elems wg_fwmark mark)"
     echo "router4:       $(set_elems router4)"
     echo "router_admin4: $(set_elems router_admin4)"
@@ -358,6 +402,8 @@ cmd_install() {
     command -v restorecon >/dev/null && restorecon -RF "$ETC_DIR" "$SBIN" "$UNIT_DST" "$DISPATCHER_DST"
     systemctl daemon-reload
     systemctl enable hostfw.service
+    [[ -f $LOCAL_FILE ]] ||
+        log "WARNING: $LOCAL_FILE missing - create it from firewall/hostfw.local.example before reboot"
     log "installed. boot mode: $(cat "$MODE_FILE")"
     log "table already loaded? keep it. else: sudo systemctl start hostfw.service"
 }
@@ -367,7 +413,7 @@ cmd_uninstall() {
     systemctl disable hostfw.service >/dev/null 2>&1 || true
     rm -f "$UNIT_DST" "$SBIN" "$DISPATCHER_DST"
     systemctl daemon-reload
-    log "uninstalled (unit, script, dispatcher). kept: $ETC_DIR"
+    log "uninstalled (unit, script, dispatcher). kept: $ETC_DIR (mode, local.conf)"
     log "runtime table untouched - remove with: hostfw.sh remove"
 }
 
@@ -381,7 +427,8 @@ hostfw - host egress filter (nftables table inet hostfw)
   enforce [--rollback MIN]   reject denied traffic (default rollback: 3 min,
                              reverts to observe; --no-rollback to skip)
   confirm                    cancel pending rollback, save mode for boot (if installed)
-  sync                       refresh wg_fwmark + router4 (new network; NM dispatcher does it)
+  sync                       load vpn_dns4 + vpn_api4 from /etc/hostfw/local.conf,
+                             refresh wg_fwmark + router4 (new network; NM dispatcher does it)
                              tunnel down: keeps last wg_fwmark (/var/lib/hostfw/wg_fwmark)
   router-open [MIN]          allow router web UI tcp 80,443 for MIN (default 10) minutes
   status                     mode, rollback, sets, counters
@@ -390,7 +437,8 @@ hostfw - host egress filter (nftables table inet hostfw)
   remove                     delete the runtime table
   install / uninstall        boot unit + NM dispatcher (+ /usr/local/sbin/hostfw)
 
-env: HOSTFW_RULESET, HOSTFW_WG_IFACES (wg0-mullvad)
+local.conf: this machine's addresses, not in git (firewall/hostfw.local.example)
+env: HOSTFW_RULESET, HOSTFW_LOCAL, HOSTFW_WG_IFACES (wg0-mullvad)
 EOF
 }
 

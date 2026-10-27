@@ -4,3 +4,7 @@ scap-*.xml
 scap-*.txt
 *.arf.xml
 *.log
+
+# hostfw: this machine's addresses (see firewall/hostfw.local.example)
+local.conf
+*.local

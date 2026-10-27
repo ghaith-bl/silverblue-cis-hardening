@@ -5,7 +5,7 @@
 #
 # why:
 #   - 192.168.122.0/24 accept: virbr0 is not in drop -> never serves VMs,
-#     but accepts spoofed VM-subnet sources on wlo1 / the VPN tunnel
+#     but accepts spoofed VM-subnet sources on the uplink / the VPN tunnel
 #   - 127.0.0.1 accept: firewalld already accepts lo -> redundant
 set -euo pipefail
 

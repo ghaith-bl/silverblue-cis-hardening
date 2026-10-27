@@ -1,0 +1,18 @@
+# /etc/hostfw/local.conf - this machine's addresses for hostfw. Never in git.
+#
+# Format: <set> <ipv4>[,<ipv4>...]    one set per line, "#" = comment
+# Both sets are required. Missing / invalid file: `hostfw apply` refuses,
+# `hostfw sync` and boot leave both sets empty (VPN DNS + VPN API blocked).
+#
+# Create:  sudo install -m 0600 -o root -g root firewall/hostfw.local.example /etc/hostfw/local.conf
+#          sudoedit /etc/hostfw/local.conf     (remove the "#" and put the real values)
+# Load:    sudo hostfw sync
+# Check:   sudo hostfw status                  (local.conf: ok)
+#
+# Mullvad resolver inside the tunnel (connected):
+#   resolvectl dns wg0-mullvad
+#vpn_dns4 <address>
+#
+# Mullvad API outside the tunnel (disconnected, the address inet mullvad allows):
+#   mullvad disconnect; sudo nft list chain inet mullvad output | grep 'dport 443'; mullvad connect
+#vpn_api4 <address>

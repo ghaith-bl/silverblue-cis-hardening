@@ -11,7 +11,7 @@ Repo file and key checked before install (key: https://mullvad.net/help/verifyin
     curl -fsS -o /tmp/mullvad-keyring.asc https://repository.mullvad.net/rpm/mullvad-keyring.asc
     gpg --show-keys --with-fingerprint /tmp/mullvad-keyring.asc
     # pub rsa4096 A119 8702 FC3E 0A09 A9AE  5B75 D5A1 D4F2 66DE 8DDF
-    # uid Mullvad (code signing) <admin@mullvad.net>, signing subkey ...A26581F219C8314C
+    # uid Mullvad (code signing), signing subkey ...A26581F219C8314C
     sudo curl -fsS -o /etc/yum.repos.d/mullvad.repo https://repository.mullvad.net/rpm/stable/mullvad.repo
     sudo restorecon -v /etc/yum.repos.d/mullvad.repo
     rpm-ostree refresh-md
@@ -44,9 +44,9 @@ Not used: split tunneling, custom DNS, DNS content blockers, Allow LAN.
 | item | value | hostfw |
 |---|---|---|
 | tunnel | `wg0-mullvad` | `if_vpn`, `if_trusted` |
-| DNS | 10.64.0.1 via the tunnel (systemd-resolved, `~.`) | `vpn_dns4` |
+| DNS | Mullvad resolver via the tunnel (systemd-resolved, `~.`) | `vpn_dns4` (local.conf) |
 | mark | 0x6d6f6c65 (`wg show wg0-mullvad fwmark`) | `wg_fwmark` -> `out_wg` |
-| API outside the tunnel | uid 0 tcp/443 to 45.83.223.196, no mark | `vpn_api4` -> `out_vpn_api` |
+| API outside the tunnel | uid 0 tcp/443 to the API address, no mark | `vpn_api4` (local.conf) -> `out_vpn_api` |
 | routing | `not fwmark 0x6d6f6c65 lookup 1836018789` (table id = the mark) | - |
 | kill switch | table `inet mullvad`, policy drop in / out / forward | not touched |
 | split tunneling | ct mark 0xf41 + mark 0x6d6f6c65 | not accepted -> out_leak |
@@ -54,23 +54,22 @@ Not used: split tunneling, custom DNS, DNS content blockers, Allow LAN.
 - Relay transport carries the mark (only privileged processes can set it, Mullvad
   docs/security.md) -> out_wg.
 - The daemon's API calls outside the tunnel do NOT carry the mark (host 2026-10-26: uid 0
-  tcp/443 to 45.83.223.196 and 217.138.213.18, then DoH fallbacks 1.1.1.1 1.0.0.1
-  9.9.9.9 149.112.112.112) -> out_leak, rejected in enforce. Connect still works (cached
+  tcp/443 to two API addresses, then public DoH fallbacks) -> out_leak, rejected in enforce. Connect still works (cached
   relay list); inside the tunnel the API is allowed (out_new).
 - Mullvad's own rule while disconnected (`mullvad disconnect; sudo nft list chain inet
-  mullvad output`, 2026-10-26): `ip daddr 45.83.223.196 tcp dport 443 meta skuid 0
+  mullvad output`, 2026-10-26): `ip daddr <API address> tcp dport 443 meta skuid 0
   accept`. hostfw does the same: set `vpn_api4`, rule `out_vpn_api`. Another API address
   (Mullvad changes it) = OUT-LEAK uid 0 tcp/443 again: compare with that chain, update
-  `vpn_api4`. The DoH fallbacks stay blocked.
+  `vpn_api4` in /etc/hostfw/local.conf, then `sudo hostfw sync`. The DoH fallbacks stay blocked.
 - Other API access methods (Bridges, Encrypted DNS proxy) use other addresses and ports
   (seen 2026-10-27: public DoH resolvers tcp/443, proxy on another port) -> out_leak.
   Disabled in the app; if `mullvad api-access get` shows anything but Direct, the daemon
   switched after Direct failed.
-- ICMP echo TTL=1 to the relay on wlo1, uid 0, no mark (before / at connect): rejected,
+- ICMP echo TTL=1 to the relay on the uplink, uid 0, no mark (before / at connect): rejected,
   connect not affected.
 - `inet mullvad` and `inet hostfw` both filter: a packet leaves only if both accept.
-- DNS content blockers change the resolver address: add the new one to `vpn_dns4` before
-  turning them on (`resolvectl dns wg0-mullvad`).
+- DNS content blockers change the resolver address: add the new one to `vpn_dns4` in
+  /etc/hostfw/local.conf (`sudo hostfw sync`) before turning them on (`resolvectl dns wg0-mullvad`).
 - Router web UI: `sudo hostfw router-open 10` + `mullvad lan set allow`, then
   `mullvad lan set block`.
 
@@ -79,7 +78,7 @@ Not used: split tunneling, custom DNS, DNS content blockers, Allow LAN.
     mullvad status -v                      # Connected, relay, tunnel wg0-mullvad
     mullvad lockdown-mode get              # on
     sudo nft list chain inet mullvad output | head -3     # policy drop
-    resolvectl dns wg0-mullvad             # 10.64.0.1
+    resolvectl dns wg0-mullvad             # same as vpn_dns4 in /etc/hostfw/local.conf
     sudo hostfw status                     # wg_fwmark 0x6d6f6c65
     mullvad api-access list                # only "1. Direct *" has the star
     mullvad api-access get                 # Direct

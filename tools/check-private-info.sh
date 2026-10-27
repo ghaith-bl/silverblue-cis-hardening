@@ -104,11 +104,15 @@ generic = [(k, re.compile(r)) for k, r in generic]
 # generic hits that are fine in a public hardening repo
 ok_value = re.compile(r"""(?ix)
     noreply | @example\. | @localhost | @anthropic\.com
-  | ^127\.  | ^0\.0\.0\.0$ | ^255\.255\. | ^192\.168\.122\. | ^10\.0\.2\.
+  | ^127\.0\.0\.1$ | ^0\.0\.0\.0$ | ^255\.255\.255\.255$
   | ^(?:192\.0\.2|198\.51\.100|203\.0\.113)\.        # RFC 5737 docs ranges
-  | ^(?:1\.1\.1\.1|8\.8\.8\.8|9\.9\.9\.9)$
   | ^(?:00:){5}00$ | ^(?:ff:){5}ff$
 """)
+# standard blocks, the same on every machine (written with their prefix only):
+# RFC 1918 private, RFC 6598 CGNAT, link-local, multicast, libvirt default network.
+# Any other address - public resolvers, VPN servers, the router - is a finding.
+STANDARD_NETS = {"10.0.0.0/8", "100.64.0.0/10", "169.254.0.0/16", "172.16.0.0/12",
+                 "192.168.0.0/16", "224.0.0.0/4", "192.168.122.0/24"}
 def ok_ip(m, line):
     parts = m.split(".")
     if any(int(p) > 255 for p in parts):          # not an address (e.g. a version)
@@ -137,7 +141,10 @@ def scan(where, line):
         for m in rx.finditer(line):
             v = m.group(0)
             if ok_value.search(v): continue
-            if label == "ipv4" and ok_ip(v, line): continue
+            if label == "ipv4":
+                cidr = re.match(r"/\d{1,2}\b", line[m.end():])
+                if cidr and v + cidr.group(0) in STANDARD_NETS: continue
+                if ok_ip(v, line): continue
             report(label, where, v)
 
 data = sys.stdin.buffer.read().decode("utf-8", "replace")

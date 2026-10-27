@@ -22,14 +22,15 @@ rate limit   10/min burst 20 per rule (noise: 6/min burst 10) -> counters are ex
 | `if_vpn` | wg0-mullvad | VPN tunnel (Mullvad WireGuard) |
 | `if_trusted` | lo, wg0-mullvad, virbr0 | egress allowed, minus never-leave rules |
 | `if_vm` | virbr0 | libvirt bridges |
-| (none) | wlo1, enp44s0, anything new | uplink - router + tunnel transport only |
+| (none) | wifi, ethernet, anything new | uplink - router + tunnel transport only |
 
 ## Dynamic sets
 
 | set | filled by | content |
 |---|---|---|
 | `wg_fwmark` | ruleset (0x6d6f6c65), `hostfw sync` / NM dispatcher | `wg show wg0-mullvad fwmark` |
-| `vpn_api4` | ruleset (45.83.223.196) | Mullvad API, the address inet mullvad allows outside the tunnel |
+| `vpn_dns4` | `/etc/hostfw/local.conf`, `hostfw sync` | Mullvad resolver inside the tunnel |
+| `vpn_api4` | `/etc/hostfw/local.conf`, `hostfw sync` | Mullvad API, the address inet mullvad allows outside the tunnel |
 | `router4` | `hostfw sync` / NM dispatcher | IPv4 default gateways, not the tunnel |
 | `router_admin4` | `hostfw router-open [MIN]` | gw . 80, gw . 443 with timeout |
 | `lan_allow4` | edit `hostfw.nft` | static `ip . proto . port` exceptions |
@@ -40,7 +41,7 @@ rate limit   10/min burst 20 per rule (noise: 6/min burst 10) -> counters are ex
 |---|---|---|---|---|
 | 1 | out_est | ct established,related | accept | - |
 | 2 | out_lo | oif lo | accept | - |
-| 3 | out_dns_vpn | tcp/udp 53,853 -> 10.64.0.1 via wg0-mullvad | accept, counted | - |
+| 3 | out_dns_vpn | tcp/udp 53,853 -> vpn_dns4 via wg0-mullvad | accept, counted | - |
 | 4 | out_dns_vm | tcp/udp 53,853 via virbr0 | accept | - |
 | 5 | out_dns | any other tcp/udp 53,853 | deny | HFW-OUT-DNS |
 | 6 | out_disco | udp 137,138,1900,3702,5351,5353,5355,27036 / tcp 5355,5357,5358,27036,27037 | deny | HFW-OUT-DISCO |
@@ -91,7 +92,7 @@ out_lan / out_leak (not used on this host).
 - `ct new` = packets of a flow before its first reply: 1 line per TCP connect,
   1+ per UDP flow (more if the peer never answers, rate limit applies)
 - same verdict as the next rule (`out_trusted` / `fwd_vm_vpn`), logging only
-- DNS to 10.64.0.1 is counted (`out_dns_vpn`), not logged
+- DNS to vpn_dns4 is counted (`out_dns_vpn`), not logged
 - `hostfw report`: per-rule totals only, not in top flows
 
 `deny` = count + log + `jump enforce`:
@@ -102,7 +103,7 @@ out_lan / out_leak (not used on this host).
 
 | group | ports |
 |---|---|
-| DNS / DoT | tcp/udp 53, 853 (only 10.64.0.1 via tunnel, or own VMs) |
+| DNS / DoT | tcp/udp 53, 853 (only vpn_dns4 via tunnel, or own VMs) |
 | NetBIOS NS / DGM | udp 137, 138 |
 | SSDP / UPnP | udp 1900 |
 | WS-Discovery | udp 3702, tcp 5357, 5358 |

@@ -10,11 +10,11 @@ Own nftables table `inet hostfw`, next to firewalld. Zero trust LAN: router only
   forward), kept while disconnected by lockdown mode. A second, independent layer:
   hostfw does not rely on it and never edits it
 - Mullvad routing: `ip rule 32765: not fwmark 0x6d6f6c65 lookup 1836018789` (= 0x6d6f6c65)
-  -> everything else via wg0-mullvad; marked traffic (relay transport) via wlo1
+  -> everything else via wg0-mullvad; marked traffic (relay transport) via the uplink
 - `ip rule 32764: lookup main suppress_prefixlength 0` -> non-default routes in main win
-  -> LAN (192.168.8.0/24) routed outside the tunnel (Mullvad blocks it while Allow LAN
+  -> the LAN subnet routed outside the tunnel (Mullvad blocks it while Allow LAN
   is off, hostfw blocks it too: out_lan)
-- IPv6: no global addr on wlo1 -> no v6 internet leak, but ULA / link-local LAN open both ways
+- IPv6: no global addr on the uplink -> no v6 internet leak, but ULA / link-local LAN open both ways
 - rootless Podman / kind: traffic = host output from `pasta` (no host bridge, no container IPs)
 
 ## Layers
@@ -38,6 +38,7 @@ hostfw.sh                     apply | observe | enforce | confirm | sync | route
                               status | counters | report | remove | install | uninstall
 hostfw.service                boot unit (own unit - not nftables.service)
 nm-dispatcher/90-hostfw-sync  re-sync router4 (+ wg_fwmark while the tunnel is up) on network up
+hostfw.local.example         template for /etc/hostfw/local.conf (this machine's addresses)
 firewalld-cleanup.sh          drop-zone legacy rich rules (runtime, then --permanent)
 docs/rules.md                 every rule, prefix, counter (sectop contract)
 ```
@@ -48,6 +49,7 @@ Installed paths:
 /usr/local/sbin/hostfw
 /etc/hostfw/hostfw.nft
 /etc/hostfw/mode                                   observe | enforce
+/etc/hostfw/local.conf                             vpn_dns4, vpn_api4 (root 0600, never in git)
 /etc/systemd/system/hostfw.service
 /etc/NetworkManager/dispatcher.d/90-hostfw-sync
 ```
@@ -66,6 +68,7 @@ Installed paths:
 ```bash
 sudo nft list tables                # no stale "inet hostfw"
 sudo wg show wg0-mullvad fwmark     # VPN connected: 0x6d6f6c65
+sudo test -s /etc/hostfw/local.conf && echo ok   # else: hostfw.local.example
 ```
 
 ### 1. firewalld cleanup (runtime)
@@ -109,7 +112,8 @@ Watch for:
 
 - `HFW-OUT-LEAK` with `MARK=` and no uid -> WireGuard mark mismatch -> `sync`, check `wg show wg0-mullvad fwmark`
 - `HFW-OUT-LEAK` from uid 0 tcp/443 while not connected -> Mullvad API on a new address, or its DoH
-  fallback: compare `vpn_api4` with `sudo nft list chain inet mullvad output` (disconnected).
+  fallback: compare `vpn_api4` with `sudo nft list chain inet mullvad output` (disconnected),
+  fix /etc/hostfw/local.conf, `sudo hostfw sync`.
   DoH or other ports from uid 0 -> API access not Direct: `mullvad api-access get`
 - `HFW-OUT-LEAK` from uid 1000 -> program around the tunnel (or split tunneling)
 - `HFW-OUT-DNS` -> app with hardcoded resolver (inside tunnel = not a leak, still bypasses resolved)
@@ -146,7 +150,9 @@ Positive - must work:
 curl -sI https://fedoraproject.org | head -1
 sudo hostfw counters | grep -E 'out_new|fwd_vm_new'     # out_new grows with new flows
 journalctl -k -n 3 --no-pager -g '^HFW-OUT-NEW'          # UID=1000, OUT=wg0-mullvad
-ping -c1 "$(ip -4 route show default dev wlo1 | awk '{print $3; exit}')"
+UP=$(ip -4 route show default | awk '{for (i = 1; i < NF; i++) if ($i == "dev") { print $(i+1); exit }}')
+GW=$(ip -4 route show default dev "$UP" | awk '{print $3; exit}')     # router
+ping -c1 "$GW"
 sudo virsh start <vm>; ssh <vm>           # VM: curl -sI https://fedoraproject.org
 podman run --rm registry.fedoraproject.org/fedora-minimal curl -sI https://fedoraproject.org
 kubectl get nodes                          # kind
@@ -158,12 +164,13 @@ Negative - must fail fast + log (`dig` from toolbox, shares host netns):
 
 ```bash
 toolbox run sudo dnf -y install bind-utils          # once, if dig missing
-toolbox run dig +time=2 @1.1.1.1 example.com       # HFW-OUT-DNS
-toolbox run dig +time=2 @192.168.8.1 example.com   # HFW-OUT-DNS
-curl -m5 --interface wlo1 https://example.com      # HFW-OUT-LEAK
-curl -m5 http://192.168.8.1                        # HFW-OUT-LAN (until router-open)
-ping -c1 -W2 192.168.8.<other-device>              # HFW-OUT-LAN
-# inside VM: ping -c1 192.168.8.1                  # HFW-FWD-VM-LAN
+# UP / GW from the positive tests (uplink, router)
+toolbox run dig +time=2 @192.0.2.1 example.com     # HFW-OUT-DNS (any resolver outside the tunnel)
+toolbox run dig +time=2 @"$GW" example.com         # HFW-OUT-DNS
+curl -m5 --interface "$UP" https://example.com     # HFW-OUT-LEAK
+curl -m5 "http://$GW"                              # HFW-OUT-LAN (until router-open)
+ping -c1 -W2 <other LAN device>                    # HFW-OUT-LAN
+# inside VM: ping -c1 <router>                     # HFW-FWD-VM-LAN
 ```
 
 Router web UI:
@@ -189,8 +196,8 @@ Setup, settings and how it fits hostfw: [../docs/mullvad.md](../docs/mullvad.md)
   mark (`out_wg`); its API calls outside the tunnel do not: `out_vpn_api` allows uid 0
   tcp/443 to the address `inet mullvad` allows (`vpn_api4`), nothing else. API access
   in the app = Direct only (docs/deviations.md)
-- DNS content blockers on -> other resolver address -> add it to `vpn_dns4` first
-  (`resolvectl dns wg0-mullvad`)
+- DNS content blockers on -> other resolver address -> add it to `vpn_dns4` in
+  /etc/hostfw/local.conf first, then `sudo hostfw sync` (`resolvectl dns wg0-mullvad`)
 - router web UI: `hostfw router-open` + `mullvad lan set allow` for the time, then `block`
 
 ## Known limits

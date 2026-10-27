@@ -66,7 +66,8 @@ Input for an OpenSCAP tailoring file.
   one known flow. With all three on, the daemon switches to a method hostfw always
   blocks (seen 2026-10-27) -> OUT-LEAK noise, slower fallback to Direct, no gain.
   Cost: no automatic fallback if a network blocks the API address or Mullvad changes it.
-  Escape: `sudo hostfw observe`, then fix `vpn_api4`. Undo: `mullvad api-access enable 2`
+  Escape: `sudo hostfw observe`, then fix `vpn_api4` in
+  /etc/hostfw/local.conf. Undo: `mullvad api-access enable 2`
   / `enable 3` (then hostfw must mirror what `inet mullvad` allows, see README Planned).
 - Lockdown mode + hostfw boot mode enforce: no internet outside the tunnel from boot,
   also while disconnected.
