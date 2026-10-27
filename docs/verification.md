@@ -46,5 +46,6 @@ Tests run after hardening + reboot. All passed.
 | no hostname in DHCP | `sudo -v`, then `sudo timeout 25 tcpdump -lni any -vv udp port 67 or udp port 68 2>/dev/null \| grep -E 'DHCP-Message\|Hostname \(12\), length\|FQDN' & sleep 3; nmcli radio wifi off; sleep 2; nmcli radio wifi on; wait` | `DHCP-Message` lines only |
 | new network (profile default -1) | same test after `sudo nmcli con modify <active uuid> ipv4.dhcp-send-hostname -1 ipv6.dhcp-send-hostname -1`, then set `no` again | `DHCP-Message` lines only (NetworkManager does not send `localhost`) |
 | hostname | `hostnamectl`; `cat /proc/sys/kernel/hostname` | `Static hostname: localhost`, no transient or pretty line; `localhost` |
+| hostname from boot | `journalctl -b -o short-monotonic \| grep 'Hostname set to'`; `grep -o 'SYSTEMD_DEFAULT_HOSTNAME=[^ ]*' /proc/cmdline` | `<localhost>` only (first line < 1 s, initramfs); the arg |
 | LLMNR / mDNS off | `resolvectl status \| grep -E 'LLMNR\|mDNS'` | only `-LLMNR -mDNS` |
 | unowned / world-writable | `sudo find / -xdev \( -nouser -o -nogroup \)` etc. | none |

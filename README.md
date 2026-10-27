@@ -92,7 +92,7 @@ sudo ./harden-workstation.sh netprivacy  # close Brave first, then log out and i
 | `audit-rules` | ~70 CIS rules, `-c`, setuid list | more log volume |
 | `perms`       | audit config 0640, GRUB cfg 0600, shell rc files 0740 | none |
 | `mic`         | WirePlumber rule disables capture nodes | no microphone |
-| `netprivacy`  | not CIS: random MAC (Wi-Fi + cable), no hostname in DHCP (every profile), generic hostname, DHCP ids from that MAC, IPv6 temporary addresses, LLMNR + mDNS off in resolved | new device on the router at every connect: no DHCP reservation; prompt shows `localhost` |
+| `netprivacy`  | not CIS: random MAC (Wi-Fi + cable), no hostname in DHCP (every profile), generic hostname (also as fallback, kernel arg: from the first second of boot), DHCP ids from that MAC, IPv6 temporary addresses, LLMNR + mDNS off in resolved | new device on the router at every connect: no DHCP reservation; prompt shows `localhost` |
 
 ## Rollback
 
@@ -106,6 +106,7 @@ systemctl --user restart wireplumber
 sudo rm /etc/NetworkManager/conf.d/90-privacy.conf /etc/systemd/resolved.conf.d/90-privacy.conf
 sudo systemctl reload NetworkManager systemd-resolved   # then reconnect
 sudo rm -r /etc/systemd/system/systemd-hostnamed.service.d && sudo systemctl daemon-reload
+sudo rpm-ostree kargs --delete=SYSTEMD_DEFAULT_HOSTNAME=localhost   # then reboot
 sudo hostnamectl set-hostname <name>             # per profile: nmcli con modify <uuid> ipv4.dhcp-send-hostname -1
 sudo ostree admin config-diff                    # every /etc change vs. image defaults
 ```

@@ -73,6 +73,11 @@
   (tcpdump, 2026-10-27). systemd counts static `localhost` as unset, so `hostnamectl`
   showed `Transient hostname: fedora` (fallback from os-release) while the kernel name
   stayed `localhost`: `SYSTEMD_DEFAULT_HOSTNAME=localhost` for systemd-hostnamed.
+- The same fallback at boot: the initramfs comes with the Silverblue image, without
+  /etc/hostname, so its systemd set `fedora` at 0.9 s, the real root `localhost` at 12 s
+  (first DHCP at 19 s: nothing sent, only early local logs). Kernel arg
+  `SYSTEMD_DEFAULT_HOSTNAME=localhost` (the kernel passes unknown `KEY=value` args to
+  PID 1 as environment): `localhost` from 0.9 s (2026-10-27).
 - With a random MAC, `/sys/class/net/*/address` is not the real one any more: the hardware
   MAC is `permaddr` in `ip link` (tools/check-private-info.sh reads both).
 

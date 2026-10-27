@@ -623,6 +623,19 @@ Environment=SYSTEMD_DEFAULT_HOSTNAME=${GENERIC_HOSTNAME}
 EOF
     systemctl daemon-reload
     systemctl try-restart systemd-hostnamed.service || true
+    # The initramfs comes with the image (no /etc/hostname in it): its systemd set the
+    # fallback "fedora" for the first ~12 s of boot. The kernel hands KEY=value args it
+    # does not know to PID 1 as environment, in the initramfs too (tested 2026-10-27).
+    local karg="SYSTEMD_DEFAULT_HOSTNAME=${GENERIC_HOSTNAME}"
+    if ! command -v rpm-ostree >/dev/null; then
+      warn "no rpm-ostree: add kernel arg $karg yourself"
+    elif rpm-ostree kargs | grep -qw -- "$karg"; then
+      log "kernel arg $karg already set"
+    elif rpm-ostree kargs --append="$karg" >/dev/null; then
+      log "kernel arg $karg added (used from the next boot)"
+    else
+      warn "rpm-ostree kargs --append=$karg failed"
+    fi
     log "hostname: $GENERIC_HOSTNAME (log out and in: X11 apps keep the old name in Xauthority)"
   fi
   # reload, not restart: a restart drops the DNS servers Mullvad set on its link
