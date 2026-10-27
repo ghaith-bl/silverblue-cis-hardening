@@ -60,6 +60,21 @@
 - A VPN client that needs its API before the tunnel is up needs a way out of an egress
   filter. Check it on the host, not from the docs: Mullvad marks only the relay
   transport, its API calls go out as uid 0 without the mark (2026-10-26).
+- Fedora ships `/usr/lib/NetworkManager/conf.d/22-wifi-mac-addr.conf`
+  (`wifi.cloned-mac-address=stable-ssid`): Wi-Fi already used a random MAC, but the same
+  one on every visit to a network; cable kept the real MAC. A random MAC alone does not
+  hide the laptop: DHCP sends the hostname (2026-10-27).
+- `ipv4.dhcp-send-hostname=false` in a `[connection]` section of NetworkManager.conf is
+  documented (profile value -1 = use it) but not used by NetworkManager 1.56.1: hostname
+  still sent after reload and reboot; `nmcli con modify <uuid> ipv4.dhcp-send-hostname no`
+  works (tcpdump, 2026-10-27; upstream issue NetworkManager#584 open). A new network gets
+  a new profile with -1: only a generic hostname covers its first connect.
+- Hostname `localhost`: NetworkManager sends no hostname option at all, even with -1
+  (tcpdump, 2026-10-27). systemd counts static `localhost` as unset, so `hostnamectl`
+  showed `Transient hostname: fedora` (fallback from os-release) while the kernel name
+  stayed `localhost`: `SYSTEMD_DEFAULT_HOSTNAME=localhost` for systemd-hostnamed.
+- With a random MAC, `/sys/class/net/*/address` is not the real one any more: the hardware
+  MAC is `permaddr` in `ip link` (tools/check-private-info.sh reads both).
 
 ## sysctl
 

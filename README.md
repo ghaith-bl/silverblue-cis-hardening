@@ -59,6 +59,8 @@ sudo ./harden-workstation.sh all
 | `ENABLE_NOISY_AUDIT`   | `no`       | DAC / delete / failed-open audit rules (very noisy with Steam/Brave) |
 | `MAKE_AUDIT_IMMUTABLE` | `no`       | `-e 2` — enable after a week of testing |
 | `IDLE_LOCK_SECONDS`    | `900`      | GNOME idle lock |
+| `MAC_MODE`             | `random`   | `random` = new MAC on every connect, `stable-ssid` = one per Wi-Fi network |
+| `GENERIC_HOSTNAME`     | `localhost`| hostname a new network may see on its first connect; `""` = keep mine |
 
 ### Recommended order (low → high risk)
 
@@ -68,6 +70,7 @@ systemctl reboot        # test VPN, VMs, podman, a game
 sudo ./harden-workstation.sh sudo     # then: sudo -k && sudo true
 sudo ./harden-workstation.sh gnome su # then: su - (must fail), sudo true
 sudo ./harden-workstation.sh pam      # with a root shell open
+sudo ./harden-workstation.sh netprivacy  # close Brave first, then log out and in
 ```
 
 ## Sections
@@ -89,6 +92,7 @@ sudo ./harden-workstation.sh pam      # with a root shell open
 | `audit-rules` | ~70 CIS rules, `-c`, setuid list | more log volume |
 | `perms`       | audit config 0640, GRUB cfg 0600, shell rc files 0740 | none |
 | `mic`         | WirePlumber rule disables capture nodes | no microphone |
+| `netprivacy`  | not CIS: random MAC (Wi-Fi + cable), no hostname in DHCP (every profile), generic hostname, DHCP ids from that MAC, IPv6 temporary addresses, LLMNR + mDNS off in resolved | new device on the router at every connect: no DHCP reservation; prompt shows `localhost` |
 
 ## Rollback
 
@@ -99,6 +103,10 @@ faillock --user "$USER" --reset                  # from a root shell, if locked
 sudo systemctl unmask <unit>                     # bring a service back
 sudo rm /etc/wireplumber/wireplumber.conf.d/90-disable-mic.conf
 systemctl --user restart wireplumber
+sudo rm /etc/NetworkManager/conf.d/90-privacy.conf /etc/systemd/resolved.conf.d/90-privacy.conf
+sudo systemctl reload NetworkManager systemd-resolved   # then reconnect
+sudo rm -r /etc/systemd/system/systemd-hostnamed.service.d && sudo systemctl daemon-reload
+sudo hostnamectl set-hostname <name>             # per profile: nmcli con modify <uuid> ipv4.dhcp-send-hostname -1
 sudo ostree admin config-diff                    # every /etc change vs. image defaults
 ```
 

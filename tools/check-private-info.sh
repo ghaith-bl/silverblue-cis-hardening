@@ -28,15 +28,18 @@ command -v python3 >/dev/null || { echo "python3 not found" >&2; exit 2; }
 collect(){
   local u; u="$(id -un)"
   printf 'username\t%s\n'       "$u"
-  printf 'hostname\t%s\n'       "$(hostname 2>/dev/null)"
-  printf 'hostname\t%s\n'       "$(hostname -s 2>/dev/null)"
+  # a generic hostname (netprivacy) identifies nothing and is in many docs: skipped
+  { hostname; hostname -s; } 2>/dev/null | sort -u |
+    grep -vxE 'localhost(\.localdomain)?|fedora' | sed 's/^/hostname\t/'
   printf 'real-name\t%s\n'      "$(getent passwd "$u" | cut -d: -f5 | cut -d, -f1)"
   git config user.email 2>/dev/null | grep -v noreply | sed 's/^/git-email\t/'
   printf 'home-path\t%s\n'      "$HOME"
   printf 'machine-id\t%s\n'     "$(cat /etc/machine-id 2>/dev/null)"
   ip -4 -o addr show scope global 2>/dev/null | awk '{split($4,a,"/"); print "local-ip\t" a[1]}'
   ip -6 -o addr show scope global 2>/dev/null | awk '{split($4,a,"/"); print "local-ip6\t" a[1]}'
-  cat /sys/class/net/*/address 2>/dev/null | grep -v '^00:00:00:00:00:00$' | sort -u | sed 's/^/mac\t/'
+  # current + permanent (hardware) MAC: with a random MAC only permaddr is the real one
+  { cat /sys/class/net/*/address; ip -o link 2>/dev/null | grep -o 'permaddr [0-9a-f:]*' | cut -d' ' -f2; } 2>/dev/null |
+    grep -v '^00:00:00:00:00:00$' | sort -u | sed 's/^/mac\t/'
   lsblk -rno UUID 2>/dev/null | sort -u | sed 's/^/disk-uuid\t/'
   if command -v nmcli >/dev/null 2>&1; then
     nmcli -t -f NAME,TYPE connection show 2>/dev/null | awk -F: '$2 ~ /wireless/ {print "wifi-name\t" $1}'

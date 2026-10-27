@@ -40,4 +40,11 @@ Tests run after hardening + reboot. All passed.
 | kernel not tainted | `cat /proc/sys/kernel/tainted` | `0` |
 | MOK keys | `mokutil --list-enrolled \| grep -i subject:` | Fedora Secure Boot CA only |
 | modules signed | loop in [secure-boot.md](secure-boot.md) step 5 | no output |
+| MAC not the real one | `ip -j link \| python3 -c 'import json,sys; [print(l["ifname"], "changed" if l.get("permaddr") else "same") for l in json.load(sys.stdin) if l.get("link_type")=="ether"]'` | connected interfaces `changed` |
+| new MAC per connect | `cat /sys/class/net/*/address \| sha256sum \| cut -c1-12`, `nmcli radio wifi off; sleep 2; nmcli radio wifi on`, wait for connect, again | two different hashes |
+| privacy defaults | `NetworkManager --print-config \| grep -E 'cloned-mac\|send-hostname\|client-id\|duid\|ip6-privacy'` | values of `90-privacy.conf` |
+| no hostname in DHCP | `sudo -v`, then `sudo timeout 25 tcpdump -lni any -vv udp port 67 or udp port 68 2>/dev/null \| grep -E 'DHCP-Message\|Hostname \(12\), length\|FQDN' & sleep 3; nmcli radio wifi off; sleep 2; nmcli radio wifi on; wait` | `DHCP-Message` lines only |
+| new network (profile default -1) | same test after `sudo nmcli con modify <active uuid> ipv4.dhcp-send-hostname -1 ipv6.dhcp-send-hostname -1`, then set `no` again | `DHCP-Message` lines only (NetworkManager does not send `localhost`) |
+| hostname | `hostnamectl`; `cat /proc/sys/kernel/hostname` | `Static hostname: localhost`, no transient or pretty line; `localhost` |
+| LLMNR / mDNS off | `resolvectl status \| grep -E 'LLMNR\|mDNS'` | only `-LLMNR -mDNS` |
 | unowned / world-writable | `sudo find / -xdev \( -nouser -o -nogroup \)` etc. | none |

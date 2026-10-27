@@ -37,10 +37,13 @@ FINGERPRINT="disable"        # "keep" if you use a fingerprint reader ("disable"
 MIC_DISABLE="internal"       # "internal" = laptop mic + 3.5mm jack mic off (USB/Bluetooth mics still work)
                              # "all" = every mic off | "no" = leave microphones alone
 IDLE_LOCK_SECONDS=900        # screen locks after 15 minutes idle
+MAC_MODE="random"            # "random" = new MAC on every connect (Wi-Fi + cable)
+                             # "stable-ssid" = same random MAC per Wi-Fi network (Fedora default)
+GENERIC_HOSTNAME="localhost" # hostname every network may see; "" = keep the current one
 TARGET_USER="${SUDO_USER:-}" # your login user (taken from sudo)
 
 BACKUP_ROOT="/var/backups/hardening/$(date +%Y%m%d-%H%M%S)"
-SECTIONS=(sysctl modules coredump journald gnome sudo pam su services cron sshd auditd audit-rules perms mic)
+SECTIONS=(sysctl modules coredump journald gnome sudo pam su services cron sshd auditd audit-rules perms mic netprivacy)
 
 # -----------------------------------------------------------------------------
 # Helpers
@@ -562,6 +565,71 @@ EOF
   fi
 }
 
+# Not CIS: what a network I join can learn about this laptop. No real MAC, no hostname.
+sec_netprivacy() {
+  local ethmac
+  case $MAC_MODE in
+    random)      ethmac=random ;;
+    stable-ssid) ethmac=stable ;;
+    *) die "MAC_MODE must be random or stable-ssid" ;;
+  esac
+  write_file /etc/NetworkManager/conf.d/90-privacy.conf 0644 <<EOF
+# Defaults for profiles that leave these properties unset (NetworkManager.conf(5)).
+# dhcp-send-hostname here is not used by NetworkManager 1.56.1 (tested 2026-10-27):
+# set per profile below, plus a generic hostname for profiles made later.
+# Read after Fedora's /usr/lib/NetworkManager/conf.d/22-wifi-mac-addr.conf
+# (wifi.cloned-mac-address=stable-ssid): later files win.
+[device.90-privacy]
+wifi.scan-rand-mac-address=yes
+
+[connection.90-privacy]
+# MAC: never the real one (random = new one on every connect)
+wifi.cloned-mac-address=${MAC_MODE}
+ethernet.cloned-mac-address=${ethmac}
+# DHCP: no hostname, ids from the current (cloned) MAC, not machine-id
+ipv4.dhcp-send-hostname=false
+ipv6.dhcp-send-hostname=false
+ipv4.dhcp-client-id=mac
+ipv6.dhcp-duid=ll
+ipv6.ip6-privacy=2
+EOF
+  # LLMNR / mDNS answer and announce the hostname on the LAN (avahi: services section)
+  write_file /etc/systemd/resolved.conf.d/90-privacy.conf 0644 <<'EOF'
+[Resolve]
+LLMNR=no
+MulticastDNS=no
+EOF
+  if systemctl reload NetworkManager; then log "NetworkManager config reloaded"; else warn "reload NetworkManager failed - reboot"; fi
+  # existing Wi-Fi / cable profiles: no hostname in DHCP, written in the profile
+  local uuid type n=0
+  while IFS=: read -r uuid type; do
+    case $type in 802-11-wireless|802-3-ethernet) ;; *) continue ;; esac
+    if nmcli connection modify "$uuid" ipv4.dhcp-send-hostname no ipv6.dhcp-send-hostname no; then
+      n=$((n + 1))
+    else
+      warn "profile $uuid: dhcp-send-hostname not changed"
+    fi
+  done < <(nmcli -g UUID,TYPE connection show)
+  log "dhcp-send-hostname=no on $n Wi-Fi / cable profiles"
+  # profiles made later (a new network) send the hostname on their first connect
+  if [[ -n $GENERIC_HOSTNAME ]]; then
+    hostnamectl set-hostname --static "$GENERIC_HOSTNAME"
+    hostnamectl set-hostname --pretty ""     # pretty name = Bluetooth / GNOME device name
+    # static "localhost" counts as unset: hostnamed then shows the distro fallback
+    # ("fedora") as transient hostname. Same name as fallback (systemd.io ENVIRONMENT).
+    write_file /etc/systemd/system/systemd-hostnamed.service.d/90-privacy.conf 0644 <<EOF
+[Service]
+Environment=SYSTEMD_DEFAULT_HOSTNAME=${GENERIC_HOSTNAME}
+EOF
+    systemctl daemon-reload
+    systemctl try-restart systemd-hostnamed.service || true
+    log "hostname: $GENERIC_HOSTNAME (log out and in: X11 apps keep the old name in Xauthority)"
+  fi
+  # reload, not restart: a restart drops the DNS servers Mullvad set on its link
+  if systemctl reload systemd-resolved; then log "resolved config reloaded"; else warn "reload systemd-resolved failed - reboot"; fi
+  log "new MAC on the next connect: reconnect Wi-Fi / cable, or reboot"
+}
+
 # -----------------------------------------------------------------------------
 # Main
 # -----------------------------------------------------------------------------
@@ -599,6 +667,7 @@ main() {
       audit-rules) sec_audit_rules ;;
       perms)       sec_perms ;;
       mic)         sec_mic ;;
+      netprivacy)  sec_netprivacy ;;
       *)           warn "unknown section: $s" ;;
     esac
   done
