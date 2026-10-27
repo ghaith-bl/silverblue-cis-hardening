@@ -109,7 +109,8 @@ Watch for:
 
 - `HFW-OUT-LEAK` with `MARK=` and no uid -> WireGuard mark mismatch -> `sync`, check `wg show wg0-mullvad fwmark`
 - `HFW-OUT-LEAK` from uid 0 tcp/443 while not connected -> Mullvad API on a new address, or its DoH
-  fallback: compare `vpn_api4` with `sudo nft list chain inet mullvad output` (disconnected)
+  fallback: compare `vpn_api4` with `sudo nft list chain inet mullvad output` (disconnected).
+  DoH or other ports from uid 0 -> API access not Direct: `mullvad api-access get`
 - `HFW-OUT-LEAK` from uid 1000 -> program around the tunnel (or split tunneling)
 - `HFW-OUT-DNS` -> app with hardcoded resolver (inside tunnel = not a leak, still bypasses resolved)
 - `HFW-OUT-LAN` udp 547 -> ff02::1:2 -> NM DHCPv6 solicit (expected, router uses SLAAC)
@@ -186,7 +187,8 @@ Setup, settings and how it fits hostfw: [../docs/mullvad.md](../docs/mullvad.md)
 
 - connect: mullvad-daemon (system unit, auto-connect, lockdown). Relay transport has the
   mark (`out_wg`); its API calls outside the tunnel do not: `out_vpn_api` allows uid 0
-  tcp/443 to the address `inet mullvad` allows (`vpn_api4`), nothing else
+  tcp/443 to the address `inet mullvad` allows (`vpn_api4`), nothing else. API access
+  in the app = Direct only (docs/deviations.md)
 - DNS content blockers on -> other resolver address -> add it to `vpn_dns4` first
   (`resolvectl dns wg0-mullvad`)
 - router web UI: `hostfw router-open` + `mullvad lan set allow` for the time, then `block`

@@ -28,8 +28,14 @@ https://mullvad.net/help/install-mullvad-app-linux
     mullvad lockdown-mode set on           # first: kill switch also while disconnected
     mullvad auto-connect set on            # connects at boot, before login
     mullvad account login                  # number typed at the prompt, never in a file
+    mullvad api-access use 1               # Direct
+    mullvad api-access disable 3           # Encrypted DNS proxy
+    mullvad api-access disable 2           # Mullvad Bridges
     mullvad connect
     mullvad status -v
+
+API access only Direct: the one method hostfw allows outside the tunnel
+(docs/deviations.md).
 
 Not used: split tunneling, custom DNS, DNS content blockers, Allow LAN.
 
@@ -56,6 +62,10 @@ Not used: split tunneling, custom DNS, DNS content blockers, Allow LAN.
   accept`. hostfw does the same: set `vpn_api4`, rule `out_vpn_api`. Another API address
   (Mullvad changes it) = OUT-LEAK uid 0 tcp/443 again: compare with that chain, update
   `vpn_api4`. The DoH fallbacks stay blocked.
+- Other API access methods (Bridges, Encrypted DNS proxy) use other addresses and ports
+  (seen 2026-10-27: public DoH resolvers tcp/443, proxy on another port) -> out_leak.
+  Disabled in the app; if `mullvad api-access get` shows anything but Direct, the daemon
+  switched after Direct failed.
 - ICMP echo TTL=1 to the relay on wlo1, uid 0, no mark (before / at connect): rejected,
   connect not affected.
 - `inet mullvad` and `inet hostfw` both filter: a packet leaves only if both accept.
@@ -71,6 +81,8 @@ Not used: split tunneling, custom DNS, DNS content blockers, Allow LAN.
     sudo nft list chain inet mullvad output | head -3     # policy drop
     resolvectl dns wg0-mullvad             # 10.64.0.1
     sudo hostfw status                     # wg_fwmark 0x6d6f6c65
+    mullvad api-access list                # only "1. Direct *" has the star
+    mullvad api-access get                 # Direct
 
 ## Proton VPN removed (2026-10-26)
 

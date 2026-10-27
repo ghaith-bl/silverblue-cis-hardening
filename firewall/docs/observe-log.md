@@ -162,3 +162,23 @@ Counters reset every boot -> use `hostfw report` (reads kernel journal).
 - Added the same exception to hostfw: set vpn_api4, rule out_vpn_api (uid 0, tcp 443).
   netns test: root to the address -> out_vpn_api; uid 1000 to it, root to another
   address -> out_leak.
+
+## 2026-10-27: API exception test, API access set to Direct only
+- `hostfw.sh install` + `apply` with the `vpn_api4` set, `enforce
+  --rollback 10`.
+- 10:02, before the new ruleset was loaded: uid 0 tcp/443 SYN x3 to the API address
+  on the uplink -> OUT-LEAK (old table had no `vpn_api4`).
+- Direct failed -> the daemon switched API access by itself to "Encrypted DNS proxy"
+  (`mullvad api-access get`).
+- 10:05 test (`disconnect; relay update; sleep 5; connect`): out_vpn_api 0. OUT-LEAK
+  uid 0: public DoH resolvers tcp/443 and the proxy on another port, all
+  rejected. Connect fine (cached relay list). `relay update`
+  runs in the background, so this test does not show which path it took.
+- `inet mullvad` while connected: no tcp/443 / skuid rule (the API rule is only there
+  while disconnected / blocked). /var/cache/mullvad-vpn/api-ip-address.txt does not exist.
+- Decision: API access only Direct (`use 1`, `disable 3`, `disable 2`, docs/deviations.md).
+- Retest 10:2x: `mullvad disconnect && sleep 3 && mullvad api-access test 1` ->
+  `Success!`, out_vpn_api 0 -> 1 (60 bytes = the SYN; the rest is established), no
+  OUT-LEAK to the API address, no DoH or proxy. Connect fine.
+- Only line in the log: ICMP echo TTL=1 to the relay network, uid 0 (known, rejected).
+- `hostfw confirm`: boot mode enforce (unchanged).

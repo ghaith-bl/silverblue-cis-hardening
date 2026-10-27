@@ -109,6 +109,10 @@ sudo ostree admin config-diff                    # every /etc change vs. image d
 
 - USBGuard, lock screen only
 - Mullvad: management socket limited to one group (`MULLVAD_MANAGEMENT_SOCKET_GROUP`), check docs first
+- hostfw `sync`: read the API address from `inet mullvad output` while disconnected and
+  update `vpn_api4` (today a fixed address; a new Mullvad address = blocked until updated)
+- option, only if a network ever blocks Direct: hostfw mirrors whatever `inet mullvad`
+  allows at the time, and Bridges / Encrypted DNS proxy go back on
 - health-report script
 
 ## Docs

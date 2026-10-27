@@ -60,6 +60,14 @@ Input for an OpenSCAP tailoring file.
 - Management socket: any local user can talk to the daemon (connect, disconnect,
   settings). Single-user laptop; planned: limit it to one group.
 - The RPM ships the GUI too (one package). Not started, no autostart.
+- API access: only "Direct" enabled; "Mullvad Bridges" and "Encrypted DNS proxy" disabled
+  (2026-10-27). My design, not from Mullvad, CIS or Red Hat docs. Why: hostfw allows the
+  daemon outside the tunnel only for Direct (`vpn_api4`, root tcp/443), least privilege:
+  one known flow. With all three on, the daemon switches to a method hostfw always
+  blocks (seen 2026-10-27) -> OUT-LEAK noise, slower fallback to Direct, no gain.
+  Cost: no automatic fallback if a network blocks the API address or Mullvad changes it.
+  Escape: `sudo hostfw observe`, then fix `vpn_api4`. Undo: `mullvad api-access enable 2`
+  / `enable 3` (then hostfw must mirror what `inet mullvad` allows, see README Planned).
 - Lockdown mode + hostfw boot mode enforce: no internet outside the tunnel from boot,
   also while disconnected.
 - hostfw observe week ended after 1 day (2026-10-19). Findings: firewall/docs/observe-log.md.

@@ -8,6 +8,7 @@ Tests run after hardening + reboot. All passed.
 |-------|---------|--------|
 | VPN + kill switch | `mullvad disconnect`, `ping -c 3 archlinux.org` (then `mullvad connect`) | no connectivity (lockdown, expected) |
 | VPN connected | `ping -c 3 archlinux.org` | 0% loss |
+| VPN API outside the tunnel | `mullvad api-access list`; `mullvad disconnect && sleep 3 && mullvad api-access test 1`; `sudo hostfw counters \| grep out_vpn_api` (then `mullvad connect`) | only Direct enabled; `Success!`; `out_vpn_api` grows, no OUT-LEAK to the API address |
 | VM SSH | `ssh toolkit-lab` | OK |
 | VM internet | `curl -sI https://archlinux.org` | `HTTP/2 200` |
 | VM large download (MTU) | `curl -o /dev/null 'https://speed.cloudflare.com/__down?bytes=20000000'` | 20000000 bytes |
