@@ -131,6 +131,7 @@ Same intent in both browsers.
 | Built-in VPN | `BraveVPNDisabled: true` | `IPProtectionAvailable: false` | Brave VPN has no Linux client; Mullvad VPN covers the whole system |
 | Camera / mic / location / notifications | blocked by policy | blocked + locked | mic is also disabled at the OS level (WirePlumber) |
 | WebRTC | `disable_non_proxied_udp` | default address only, no host candidates | no real-IP leak around the VPN |
+| Cast | `EnableMediaRouter: false` | - (no Cast) | Cast discovery listens on mDNS 224.0.0.251:5353; nothing listens outside loopback (sectop `listeners`) |
 | Tracking | Shields forced on: ads/trackers block, fingerprinting standard, HTTPS strict, referrer cap, De-AMP, debounce, query-param strip, GPC, language FP | ETP on (trackers, cryptominers, fingerprinters, email, suspected FP) as **unlocked** default; GPC locked | Brave "Strict" fingerprinting no longer exists. Firefox: one profile runs a custom set (RFP, FPI, cookieBehavior 1) that a forced category would overwrite |
 | Cookies | 3rd-party blocked (all profiles); clearing on exit stays per profile | left to the profile (strict / custom) | some profiles keep logins |
 | HTTPS | HTTPS-Only forced | HTTPS-Only forced | |

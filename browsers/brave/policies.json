@@ -37,6 +37,7 @@
   "ScreenCaptureAllowed": false,
   "WebRtcIPHandling": "disable_non_proxied_udp",
   "WebRtcLocalIpsAllowedUrls": [],
+  "EnableMediaRouter": false,
   "DefaultGeolocationSetting": 2,
   "DefaultSensorsSetting": 2,
   "DefaultSerialGuardSetting": 2,
