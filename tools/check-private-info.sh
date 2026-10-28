@@ -8,8 +8,9 @@
 #
 # Nothing personal is written in this file. Machine-specific values
 # (user, hostname, real name, IPs, MACs, machine-id, disk UUIDs, Wi-Fi
-# names, network interface names, hardware serials) are read live from
-# the system at run time.
+# names, NetworkManager profile UUIDs, network interface names, hardware
+# serials) are read live from the system at run time. IDs are also found
+# without dashes, systemd-escaped (\x2d) and hex-encoded (audit proctitle).
 #
 # Exit 0 = clean, 1 = findings, 2 = error. Matches are printed masked.
 #
@@ -63,6 +64,7 @@ collect(){
   lsblk -rno UUID 2>/dev/null | sort -u | sed 's/^/disk-uuid\t/'
   if command -v nmcli >/dev/null 2>&1; then
     nmcli -t -f NAME,TYPE connection show 2>/dev/null | awk -F: '$2 ~ /wireless/ {print "wifi-name\t" $1}'
+    nmcli -t -f UUID connection show 2>/dev/null | sed 's/^/nm-uuid\t/'
   fi
   for f in /sys/class/dmi/id/{product,board,chassis}_serial; do
     [ -r "$f" ] && printf 'hw-serial\t%s\n' "$(cat "$f" 2>/dev/null)"
@@ -107,7 +109,25 @@ def lit(label, v):
             r"|\b(?:acct|user|owner|User|USER)[=:]\s*\"?" + e + r"\b"
             r"|\bchown\s+(?:-\S+\s+)*" + e + r"[:\s]"
             r"|\(" + e + r"\)", re.I)
+    if label in ID_LABELS:
+        return re.compile("|".join(id_forms(v)), re.I)
     return re.compile(r"(?<![\w.-])" + e + r"(?![\w-])", re.I)
+
+# IDs show up in other shapes: luks-<uuid>, CRYPT-LUKS2-<no dashes>, luks\x2d<...>
+# from systemd-escape (also with the backslash doubled, as in source / JSON), hex in
+# audit proctitle / cmd. Hex boundaries only, so
+# "luks-<uuid>" and "spawn-<uuid>" still match.
+ID_LABELS = {"disk-uuid", "nm-uuid", "machine-id"}
+def id_forms(v):
+    v = v.lower()
+    bare = v.replace("-", "")
+    text = {v, bare}
+    if len(bare) == 32:
+        text.add("-".join((bare[:8], bare[8:12], bare[12:16], bare[16:20], bare[20:])))
+    text |= {t.replace("-", e) for t in text if "-" in t for e in ("\\x2d", "\\\\x2d")}
+    forms = [r"(?:(?<=\\x2d)|(?<![0-9a-f]))" + re.escape(t) + r"(?![0-9a-f])" for t in sorted(text)]
+    forms += [re.escape(t.encode().hex()) for t in sorted(text)]   # inside longer hex
+    return forms
 
 checks = [(k, lit(k, v)) for k, v in machine]
 
@@ -154,7 +174,7 @@ def mask(s):
 allow_path = os.environ["ALLOW"]
 labels = {k for k, _ in machine} | {k for k, _ in generic} | {
     "username", "hostname", "real-name", "git-email", "home-path", "machine-id", "local-ip",
-    "local-ip6", "mac", "iface", "disk-uuid", "wifi-name", "hw-serial"}
+    "local-ip6", "mac", "iface", "disk-uuid", "nm-uuid", "wifi-name", "hw-serial"}
 rules = []                                          # [label, glob, regex, line no, hits]
 if os.path.isfile(allow_path):
     for n, row in enumerate(open(allow_path, encoding="utf-8", errors="replace"), 1):
