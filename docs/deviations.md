@@ -33,6 +33,7 @@ Input for an OpenSCAP tailoring file.
 | Rule | Decision | Reason |
 |------|----------|--------|
 | `sysctl_kernel_kptr_restrict` | set `2` | stricter than the CIS value `1` (hidden from root too) |
+| `sysctl_kernel_yama_ptrace_scope` | set `2` | admin-only attach, idea from secureblue (no ptrace by default). CIS RHEL 9 v3.0.0 accepts `1`, `2` or `3` and recommends `2`; RHEL 9 STIG (RHEL-09-213080) wants exactly `1`: finding there. Scanner fails if its profile value is `1`. Cost: `gdb` / `strace` need sudo; anti-cheat games need ptrace (GTA Online does not run on Linux anyway). Tested 2026-10-30 at runtime: Steam game, browsers, VMs OK. Undo: set `1`, `sudo sysctl --system` (no reboot) |
 | `auditd_data_disk_full_action`, `auditd_data_retention_admin_space_left_action` | `SUSPEND` | CIS `HALT`/`SINGLE` would stop a laptop when the disk fills |
 | `auditd_data_retention_space_left_action` | `SYSLOG` | no local MTA for `EMAIL` |
 | `auditd_data_retention_max_log_file_action` | keep `ROTATE` | CIS `KEEP_LOGS` has no limit; `/var` also holds `/var/home` |
@@ -49,7 +50,7 @@ Input for an OpenSCAP tailoring file.
 | `audit_rules_kernel_module_loading_create`, `..._query` | `create_module` / `query_module` do not exist on x86_64 | — |
 | `ensure_fedora_gpgkey_installed` | ostree verifies commits with its own remote keys | `grep -r gpg-verify /etc/ostree/remotes.d/` |
 | `package_cron_installed` | `cronie` is layered | `rpm -q cronie` |
-| `sysctl_kernel_yama_ptrace_scope`, `sysctl_fs_suid_dumpable` | conflicting defaults in `/usr/lib/sysctl.d/`; ours loads last | `sysctl kernel.yama.ptrace_scope fs.suid_dumpable` → `1`, `0` |
+| `sysctl_kernel_yama_ptrace_scope`, `sysctl_fs_suid_dumpable` | conflicting defaults in `/usr/lib/sysctl.d/` (`10-default-yama-scope.conf` sets `0`); ours loads last | `sysctl kernel.yama.ptrace_scope fs.suid_dumpable` → `2`, `0` |
 | `file_groupownership_sshd_private_key` | Fedora uses group `ssh_keys` by design | — |
 | `sshd_*` | sshd is masked; hardened drop-in present | `systemctl is-enabled sshd` → `masked` |
 | ~17 `audit_rules_*` | rules loaded, different text format than the scanner regex | `sudo auditctl -l`, `ausearch -k <key>` |

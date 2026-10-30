@@ -105,7 +105,10 @@ sec_sysctl() {
 # ---- Kernel ----
 kernel.dmesg_restrict = 1
 kernel.kptr_restrict = 2
-kernel.yama.ptrace_scope = 1
+# 2 = admin-only attach: only CAP_SYS_PTRACE may trace (gdb / strace need sudo).
+# CIS RHEL 9 v3.0.0 accepts 1, 2 or 3 and recommends 2; RHEL 9 STIG wants 1.
+# 3 cannot be lowered until reboot.
+kernel.yama.ptrace_scope = 2
 kernel.randomize_va_space = 2
 kernel.kexec_load_disabled = 1
 kernel.unprivileged_bpf_disabled = 1

@@ -86,6 +86,9 @@
 - Removing a file from `/etc/sysctl.d/` does not revert values until reboot.
 - `kernel.kexec_load_disabled = 1` and `kernel.unprivileged_bpf_disabled = 1` cannot be undone until reboot.
 - `ptrace_scope = 1`: `gdb ./prog` / `strace ./prog` still work; attaching to a running process needs sudo.
+- `ptrace_scope = 2` (since 2026-10-30): `gdb ./prog` / `strace ./prog` need sudo too (`PTRACE_TRACEME`
+  needs `CAP_SYS_PTRACE`, kernel Yama docs). Yama checks attach only, so `/proc/<pid>` reads stay as before.
+  Can be set back without reboot; only `3` is one-way.
 
 ## Audio
 

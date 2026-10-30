@@ -27,7 +27,7 @@ Tests run after hardening + reboot. All passed.
 | identity watch | `sudo touch /etc/passwd; sudo ausearch -k identity -ts recent -i` | event with `auid=<user>` |
 | hostname syscall | `sudo hostname "$(hostname)"; sudo ausearch -k system-locale -ts recent -i` | `syscall=sethostname` |
 | SELinux policy watch | `sudo touch /etc/selinux/config; sudo ausearch -k MAC-policy -ts recent -i` | event |
-| sysctl | `sysctl kernel.yama.ptrace_scope kernel.kexec_load_disabled fs.suid_dumpable` | `1`, `1`, `0` |
+| sysctl | `sysctl kernel.yama.ptrace_scope kernel.kexec_load_disabled fs.suid_dumpable` | `2`, `1`, `0` |
 | password quality | `echo 'Password123' \| pwscore` | rejected (< 14 chars) |
 | faillock | `faillock --user "$USER"` | empty table |
 | su blocked | `su -` | `Permission denied` |
