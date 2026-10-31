@@ -72,4 +72,9 @@ Input for an OpenSCAP tailoring file.
   / `enable 3` (then hostfw must mirror what `inet mullvad` allows, see README Planned).
 - Lockdown mode + hostfw boot mode enforce: no internet outside the tunnel from boot,
   also while disconnected.
+- No DNS servers on Wi-Fi / cable profiles (netprivacy, 2026-10-31). Problem: 2 profiles
+  had a static public resolver; resolved used it while the tunnel had no DNS (reconnect):
+  20 queries uid 990 out of the tunnel, blocked by hostfw (`out_dns`), not a leak.
+  Cost: no DNS without the tunnel (captive portals: already closed by lockdown). New
+  networks get DHCP DNS: run netprivacy again.
 - hostfw observe week ended after 1 day (2026-10-19). Findings: firewall/docs/observe-log.md.

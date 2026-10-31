@@ -603,17 +603,32 @@ LLMNR=no
 MulticastDNS=no
 EOF
   if systemctl reload NetworkManager; then log "NetworkManager config reloaded"; else warn "reload NetworkManager failed - reboot"; fi
-  # existing Wi-Fi / cable profiles: no hostname in DHCP, written in the profile
+  # existing Wi-Fi / cable profiles, written in the profile:
+  # - no hostname in DHCP
+  # - no DNS servers (static or from DHCP): only the tunnel has one. With a server on the
+  #   uplink, resolved falls back to it while the tunnel has none (connect / reconnect)
+  #   and queries go out unencrypted (seen 2026-10-31, blocked by hostfw out_dns).
+  #   ignore-auto-dns has no global default in NetworkManager.conf(5): per profile only.
+  backup /etc/NetworkManager/system-connections
   local uuid type n=0
   while IFS=: read -r uuid type; do
     case $type in 802-11-wireless|802-3-ethernet) ;; *) continue ;; esac
-    if nmcli connection modify "$uuid" ipv4.dhcp-send-hostname no ipv6.dhcp-send-hostname no; then
+    if nmcli connection modify "$uuid" ipv4.dhcp-send-hostname no ipv6.dhcp-send-hostname no \
+         ipv4.dns "" ipv4.ignore-auto-dns yes ipv6.dns "" ipv6.ignore-auto-dns yes; then
       n=$((n + 1))
     else
-      warn "profile $uuid: dhcp-send-hostname not changed"
+      warn "profile $uuid: not changed"
     fi
   done < <(nmcli -g UUID,TYPE connection show)
-  log "dhcp-send-hostname=no on $n Wi-Fi / cable profiles"
+  log "no hostname in DHCP, no DNS servers on $n Wi-Fi / cable profiles"
+  # live connections: reapply (no reconnect, same MAC and lease)
+  local dev state
+  while IFS=: read -r dev type state; do
+    case $type in wifi|ethernet) ;; *) continue ;; esac
+    [[ $state == connected ]] || continue
+    if nmcli device reapply "$dev" >/dev/null; then log "reapplied $dev"; else warn "reapply $dev failed - reconnect it"; fi
+  done < <(nmcli -g DEVICE,TYPE,STATE device)
+  log "a network joined later gets DHCP DNS again: run netprivacy after joining it"
   # profiles made later (a new network) send the hostname on their first connect
   if [[ -n $GENERIC_HOSTNAME ]]; then
     hostnamectl set-hostname --static "$GENERIC_HOSTNAME"

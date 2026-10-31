@@ -48,4 +48,6 @@ Tests run after hardening + reboot. All passed.
 | hostname | `hostnamectl`; `cat /proc/sys/kernel/hostname` | `Static hostname: localhost`, no transient or pretty line; `localhost` |
 | hostname from boot | `journalctl -b -o short-monotonic \| grep 'Hostname set to'`; `grep -o 'SYSTEMD_DEFAULT_HOSTNAME=[^ ]*' /proc/cmdline` | `<localhost>` only (first line < 1 s, initramfs); the arg |
 | LLMNR / mDNS off | `resolvectl status \| grep -E 'LLMNR\|mDNS'` | only `-LLMNR -mDNS` |
+| DNS only in the tunnel | `resolvectl dns`; `resolvectl status \| grep -ci fallback` | a server on `wg0-mullvad` only; `0` |
+| no DNS in profiles | `for u in $(nmcli -g UUID,TYPE con show \| awk -F: '$2~/wireless\|ethernet/{print $1}'); do nmcli -g ipv4.dns,ipv4.ignore-auto-dns,ipv6.dns,ipv6.ignore-auto-dns con show "$u" \| paste -sd' '; done` | ` yes  yes` per profile |
 | unowned / world-writable | `sudo find / -xdev \( -nouser -o -nogroup \)` etc. | none |
