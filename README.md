@@ -71,6 +71,7 @@ sudo ./harden-workstation.sh sudo     # then: sudo -k && sudo true
 sudo ./harden-workstation.sh gnome su # then: su - (must fail), sudo true
 sudo ./harden-workstation.sh pam      # with a root shell open
 sudo ./harden-workstation.sh netprivacy  # close Brave first, then log out and in
+sudo ./harden-workstation.sh time     # VPN connected; then chronyc -N authdata
 ```
 
 ## Sections
@@ -93,6 +94,7 @@ sudo ./harden-workstation.sh netprivacy  # close Brave first, then log out and i
 | `perms`       | audit config 0640, GRUB cfg 0600, shell rc files 0740 | none |
 | `mic`         | WirePlumber rule disables capture nodes | no microphone |
 | `netprivacy`  | not CIS: random MAC (Wi-Fi + cable), no hostname in DHCP (every profile), generic hostname (also as fallback, kernel arg: from the first second of boot), DHCP ids from that MAC, IPv6 temporary addresses, LLMNR + mDNS off in resolved, no DNS servers in Wi-Fi / cable profiles (only the tunnel) | new device on the router at every connect: no DHCP reservation; prompt shows `localhost`; no DNS without the tunnel |
+| `time`        | chrony: NTS only (Netnod + PTB), `authselectmode require`, `minsources 2`, no pool, no NTP servers from DHCP | no time sync without the tunnel (RTC keeps time) |
 
 ## Rollback
 
@@ -109,6 +111,7 @@ sudo rm -r /etc/systemd/system/systemd-hostnamed.service.d && sudo systemctl dae
 sudo rpm-ostree kargs --delete=SYSTEMD_DEFAULT_HOSTNAME=localhost   # then reboot
 sudo hostnamectl set-hostname <name>             # per profile: nmcli con modify <uuid> ipv4.dhcp-send-hostname -1
 sudo nmcli con modify <uuid> ipv4.ignore-auto-dns no   # router DNS back (or old profile: backup system-connections)
+sudo cp /var/backups/hardening/<time>/etc/chrony.conf /etc/ && sudo systemctl restart chronyd
 sudo ostree admin config-diff                    # every /etc change vs. image defaults
 ```
 

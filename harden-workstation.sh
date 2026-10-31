@@ -43,7 +43,7 @@ GENERIC_HOSTNAME="localhost" # hostname every network may see; "" = keep the cur
 TARGET_USER="${SUDO_USER:-}" # your login user (taken from sudo)
 
 BACKUP_ROOT="/var/backups/hardening/$(date +%Y%m%d-%H%M%S)"
-SECTIONS=(sysctl modules coredump journald gnome sudo pam su services cron sshd auditd audit-rules perms mic netprivacy)
+SECTIONS=(sysctl modules coredump journald gnome sudo pam su services cron sshd auditd audit-rules perms mic netprivacy time)
 
 # -----------------------------------------------------------------------------
 # Helpers
@@ -661,6 +661,37 @@ EOF
   log "new MAC on the next connect: reconnect Wi-Fi / cable, or reboot"
 }
 
+# CIS: chrony with configured servers. Beyond CIS: authenticated time only (NTS, RFC 8915).
+# Plain NTP can be changed on the way (certificates, log times); a pool or DHCP servers let
+# the network pick my clock. Two national time labs, both NTS, free, no sign-up:
+#   Netnod (SE) https://www.netnod.se/netnod-time/how-to-use-nts
+#   PTB (DE)    https://www.ptb.de -> Time synchronization ... NTP (ptbtime4: other site)
+# NTS-KE tcp 4460, then NTP (Netnod: udp 4123): both via the tunnel (hostfw out_new).
+# DNS only via the tunnel (netprivacy): no time sync without Mullvad, the RTC keeps time.
+sec_time() {
+  write_file /etc/chrony.conf 0644 <<'EOF'
+# harden-workstation.sh time: NTS only, no pool, no servers from DHCP
+server sth1.nts.netnod.se iburst nts
+server sth2.nts.netnod.se iburst nts
+server ptbtime1.ptb.de iburst nts
+server ptbtime2.ptb.de iburst nts
+server ptbtime4.ptb.de iburst nts
+
+# only authenticated sources; at least 2 must agree before the clock is set
+authselectmode require
+minsources 2
+
+driftfile /var/lib/chrony/drift
+makestep 1.0 3
+rtcsync
+ntsdumpdir /var/lib/chrony
+leapseclist /usr/share/zoneinfo/leap-seconds.list
+logdir /var/log/chrony
+EOF
+  if systemctl restart chronyd; then log "chronyd restarted"; else warn "restart chronyd failed: journalctl -u chronyd"; fi
+  log "check in a minute: chronyc -N authdata (Mode NTS, KE > 0), chronyc -n sources"
+}
+
 # -----------------------------------------------------------------------------
 # Main
 # -----------------------------------------------------------------------------
@@ -699,6 +730,7 @@ main() {
       perms)       sec_perms ;;
       mic)         sec_mic ;;
       netprivacy)  sec_netprivacy ;;
+      time)        sec_time ;;
       *)           warn "unknown section: $s" ;;
     esac
   done

@@ -50,4 +50,7 @@ Tests run after hardening + reboot. All passed.
 | LLMNR / mDNS off | `resolvectl status \| grep -E 'LLMNR\|mDNS'` | only `-LLMNR -mDNS` |
 | DNS only in the tunnel | `resolvectl dns`; `resolvectl status \| grep -ci fallback` | a server on `wg0-mullvad` only; `0` |
 | no DNS in profiles | `for u in $(nmcli -g UUID,TYPE con show \| awk -F: '$2~/wireless\|ethernet/{print $1}'); do nmcli -g ipv4.dns,ipv4.ignore-auto-dns,ipv6.dns,ipv6.ignore-auto-dns con show "$u" \| paste -sd' '; done` | ` yes  yes` per profile |
+| time: NTS only | `chronyc -N authdata` (sudo if denied); `chronyc -n sources` | 5 servers, Mode `NTS`, KE / Cook > 0; `^*` on one of them |
+| time: synced | `chronyc tracking` | `Leap status : Normal`, small `System time` offset |
+| time: no DHCP servers | `grep -E '^(pool\|sourcedir)' /etc/chrony.conf` | nothing |
 | unowned / world-writable | `sudo find / -xdev \( -nouser -o -nogroup \)` etc. | none |
