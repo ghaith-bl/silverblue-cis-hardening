@@ -61,6 +61,7 @@ sudo ./harden-workstation.sh all
 | `IDLE_LOCK_SECONDS`    | `900`      | GNOME idle lock |
 | `MAC_MODE`             | `random`   | `random` = new MAC on every connect, `stable-ssid` = one per Wi-Fi network |
 | `GENERIC_HOSTNAME`     | `localhost`| hostname a new network may see on its first connect; `""` = keep mine |
+| `KERNEL_ARGS`          | `(initcall_blacklist=af_alg_init)` | kernel args of the `kargs` section; `()` = none |
 
 ### Recommended order (low → high risk)
 
@@ -72,6 +73,7 @@ sudo ./harden-workstation.sh gnome su # then: su - (must fail), sudo true
 sudo ./harden-workstation.sh pam      # with a root shell open
 sudo ./harden-workstation.sh netprivacy  # close Brave first, then log out and in
 sudo ./harden-workstation.sh time     # VPN connected; then chronyc -N authdata
+sudo ./harden-workstation.sh kargs    # then reboot: LUKS unlock, Wi-Fi, VPN, a VM
 ```
 
 ## Sections
@@ -90,11 +92,12 @@ sudo ./harden-workstation.sh time     # VPN connected; then chronyc -N authdata
 | `cron`        | root-only cron dirs, `cron.allow` / `at.allow` | only root + your user can use crontab |
 | `sshd`        | hardened drop-in `40-cis.conf`, server masked | no incoming SSH |
 | `auditd`      | SYSLOG / SUSPEND actions instead of HALT, log ring 40 x 32 MiB | up to 1280 MiB in `/var/log/audit` |
-| `audit-rules` | ~70 CIS rules, `-c`, setuid list | more log volume |
+| `audit-rules` | ~70 CIS rules, `-c`, setuid list; not CIS: `af-alg` (AF_ALG sockets, 2 rules) | more log volume |
 | `perms`       | audit config 0640, GRUB cfg 0600, shell rc files 0740 | none |
 | `mic`         | WirePlumber rule disables capture nodes | no microphone |
 | `netprivacy`  | not CIS: random MAC (Wi-Fi + cable), no hostname in DHCP (every profile), generic hostname (also as fallback, kernel arg: from the first second of boot), DHCP ids from that MAC, IPv6 temporary addresses, LLMNR + mDNS off in resolved, no DNS servers in Wi-Fi / cable profiles (only the tunnel) | new device on the router at every connect: no DHCP reservation; prompt shows `localhost`; no DNS without the tunnel |
 | `time`        | chrony: NTS only (Netnod + PTB), `authselectmode require`, `minsources 2`, no pool, no NTP servers from DHCP | no time sync without the tunnel (RTC keeps time) |
+| `kargs`       | not CIS: kernel args from `KERNEL_ARGS` via `rpm-ostree kargs` (next boot). `initcall_blacklist=af_alg_init`: AF_ALG (kernel crypto API from user space) off | `socket(AF_ALG)` fails; no Adiantum / Serpent / Twofish LUKS, BlueZ mesh, iwd |
 
 ## Rollback
 
@@ -112,6 +115,8 @@ sudo rpm-ostree kargs --delete=SYSTEMD_DEFAULT_HOSTNAME=localhost   # then reboo
 sudo hostnamectl set-hostname <name>             # per profile: nmcli con modify <uuid> ipv4.dhcp-send-hostname -1
 sudo nmcli con modify <uuid> ipv4.ignore-auto-dns no   # router DNS back (or old profile: backup system-connections)
 sudo cp /var/backups/hardening/<time>/etc/chrony.conf /etc/ && sudo systemctl restart chronyd
+sudo rpm-ostree kargs --delete=initcall_blacklist=af_alg_init   # then reboot
+sudo rpm-ostree rollback                         # after booting the previous GRUB entry
 sudo ostree admin config-diff                    # every /etc change vs. image defaults
 ```
 

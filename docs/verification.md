@@ -20,7 +20,7 @@ Tests run after hardening + reboot. All passed.
 
 | Check | Command | Expected |
 |-------|---------|----------|
-| audit rules loaded | `sudo auditctl -l \| wc -l` | ~70 |
+| audit rules loaded | `sudo auditctl -l \| wc -l` | ~72 |
 | audit at boot | `grep -o 'audit[^ ]*' /proc/cmdline` | `audit=1`, `audit_backlog_limit=8192` |
 | syscall auditing on | `sudo auditctl -l \| grep -c 'never,task'` | `0` |
 | audit log ring | `sudo grep -e ^max_log_file -e ^num_logs /etc/audit/auditd.conf` | `max_log_file = 32`, `num_logs = 40`, `max_log_file_action = ROTATE` |
@@ -53,4 +53,7 @@ Tests run after hardening + reboot. All passed.
 | time: NTS only | `chronyc -N authdata` (sudo if denied); `chronyc -n sources` | 5 servers, Mode `NTS`, KE / Cook > 0; `^*` on one of them |
 | time: synced | `chronyc tracking` | `Leap status : Normal`, small `System time` offset |
 | time: no DHCP servers | `grep -E '^(pool\|sourcedir)' /etc/chrony.conf` | nothing |
+| AF_ALG off (kernel arg) | `grep -o 'initcall_blacklist=[^ ]*' /proc/cmdline` | `initcall_blacklist=af_alg_init` |
+| AF_ALG socket fails | `python3 -I -c 'import socket; socket.socket(socket.AF_ALG, socket.SOCK_SEQPACKET)'` | `OSError: [Errno 97] Address family not supported by protocol` |
+| AF_ALG tries since boot | `sudo ausearch -k af-alg -sc socket -ts boot -i \| grep -o 'exe=[^ ]*' \| sort \| uniq -c` | only the test above (python3) |
 | unowned / world-writable | `sudo find / -xdev \( -nouser -o -nogroup \)` etc. | none |

@@ -78,3 +78,16 @@ Input for an OpenSCAP tailoring file.
   Cost: no DNS without the tunnel (captive portals: already closed by lockdown). New
   networks get DHCP DNS: run netprivacy again.
 - hostfw observe week ended after 1 day (2026-10-19). Findings: firewall/docs/observe-log.md.
+
+## Kernel args (not CIS)
+- `initcall_blacklist=af_alg_init` (kargs section, 2026-11-01): AF_ALG never starts.
+  Why: user-space door into the kernel crypto code, deprecated upstream for its attack
+  surface; CVE-2026-31431 (Copy Fail, local root) was in algif_aead. The usual
+  mitigation blocks `algif_aead_init` only; `af_alg_init` closes the whole family.
+  Measured first: audit rule `af-alg` (socket family 38, b64 + b32) 2 days, 0 programs.
+  LUKS2 `aes-xts-plain64` + `argon2id`, cryptsetup 2.8.8: unlocks without it (userspace
+  library). Test boot 2026-11-01: LUKS unlock OK, `socket(AF_ALG)` errno 97.
+  Cost: no Adiantum / Serpent / Twofish LUKS volumes, no BlueZ mesh, no iwd, no
+  `cryptsetup benchmark` for ciphers. Undo: `rpm-ostree kargs --delete=...`, reboot.
+- Audit rule `af-alg` kept after the block: every hit is a failed try (a program that
+  needs it, or a probe). My design, not from CIS or Red Hat. Rules: ~72.

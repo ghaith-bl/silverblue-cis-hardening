@@ -40,10 +40,11 @@ IDLE_LOCK_SECONDS=900        # screen locks after 15 minutes idle
 MAC_MODE="random"            # "random" = new MAC on every connect (Wi-Fi + cable)
                              # "stable-ssid" = same random MAC per Wi-Fi network (Fedora default)
 GENERIC_HOSTNAME="localhost" # hostname every network may see; "" = keep the current one
+KERNEL_ARGS=(initcall_blacklist=af_alg_init)   # kargs section; () = add none
 TARGET_USER="${SUDO_USER:-}" # your login user (taken from sudo)
 
 BACKUP_ROOT="/var/backups/hardening/$(date +%Y%m%d-%H%M%S)"
-SECTIONS=(sysctl modules coredump journald gnome sudo pam su services cron sshd auditd audit-rules perms mic netprivacy time)
+SECTIONS=(sysctl modules coredump journald gnome sudo pam su services cron sshd auditd audit-rules perms mic netprivacy time kargs)
 
 # -----------------------------------------------------------------------------
 # Helpers
@@ -96,6 +97,20 @@ mask_units() {
 }
 
 user_home() { getent passwd "$1" | cut -d: -f6; }
+
+# add_karg <arg>   rpm-ostree: new deployment, used from the next boot; the old one stays in GRUB
+add_karg() {
+  local karg="$1"
+  if ! command -v rpm-ostree >/dev/null; then
+    warn "no rpm-ostree: add kernel arg $karg yourself"
+  elif rpm-ostree kargs | grep -qwF -- "$karg"; then
+    log "kernel arg $karg already set"
+  elif rpm-ostree kargs --append="$karg" >/dev/null; then
+    log "kernel arg $karg added (used from the next boot)"
+  else
+    warn "rpm-ostree kargs --append=$karg failed"
+  fi
+}
 
 # -----------------------------------------------------------------------------
 # Sections
@@ -504,6 +519,17 @@ EOF
     printf '## Lock audit rules until reboot\n-e 2\n' | write_file "$d/99-finalize.rules" 0640
   fi
 
+  # Not CIS (my design, 2026-11-01): who opens an AF_ALG socket (family 38). Measured
+  # before the kargs section blocked it; after it, every try fails (EAFNOSUPPORT).
+  write_file "$d/70-af-alg.rules" 0640 <<'EOF'
+## AF_ALG sockets (kernel crypto API from user space), not CIS.
+## With kernel arg initcall_blacklist=af_alg_init (kargs section) every try fails:
+## a program that needs it, or a probe. 32-bit programs that call socketcall
+## (old i386 glibc) are not matched by family; the kernel arg blocks them anyway.
+-a always,exit -F arch=b64 -S socket -F a0=38 -k af-alg
+-a always,exit -F arch=b32 -S socket -F a0=38 -k af-alg
+EOF
+
   chmod 0640 "$d"/*.rules
   if ! augenrules --load >/dev/null; then
     warn "augenrules reported an error — run: sudo augenrules --load"
@@ -644,16 +670,7 @@ EOF
     # The initramfs comes with the image (no /etc/hostname in it): its systemd set the
     # fallback "fedora" for the first ~12 s of boot. The kernel hands KEY=value args it
     # does not know to PID 1 as environment, in the initramfs too (tested 2026-10-27).
-    local karg="SYSTEMD_DEFAULT_HOSTNAME=${GENERIC_HOSTNAME}"
-    if ! command -v rpm-ostree >/dev/null; then
-      warn "no rpm-ostree: add kernel arg $karg yourself"
-    elif rpm-ostree kargs | grep -qw -- "$karg"; then
-      log "kernel arg $karg already set"
-    elif rpm-ostree kargs --append="$karg" >/dev/null; then
-      log "kernel arg $karg added (used from the next boot)"
-    else
-      warn "rpm-ostree kargs --append=$karg failed"
-    fi
+    add_karg "SYSTEMD_DEFAULT_HOSTNAME=${GENERIC_HOSTNAME}"
     log "hostname: $GENERIC_HOSTNAME (log out and in: X11 apps keep the old name in Xauthority)"
   fi
   # reload, not restart: a restart drops the DNS servers Mullvad set on its link
@@ -690,6 +707,23 @@ logdir /var/log/chrony
 EOF
   if systemctl restart chronyd; then log "chronyd restarted"; else warn "restart chronyd failed: journalctl -u chronyd"; fi
   log "check in a minute: chronyc -N authdata (Mode NTS, KE > 0), chronyc -n sources"
+}
+
+# Not CIS: kernel args (KERNEL_ARGS). Used from the next boot; the deployment before it
+# stays in GRUB (rollback: pick it there, then sudo rpm-ostree rollback).
+#   initcall_blacklist=af_alg_init: AF_ALG (kernel crypto API from user space) never
+#   starts. Upstream deprecated it (attack surface); CVE-2026-31431 (Copy Fail) was in
+#   algif_aead, part of it. The usual mitigation blocks algif_aead_init only;
+#   af_alg_init blocks the whole family. Before: 2 days of audit (key af-alg), no
+#   program used it; LUKS2 aes-xts-plain64 + argon2id unlocks without it (cryptsetup
+#   >= 2.8.7 falls back to a userspace library). Test 2026-11-01: boot + unlock OK,
+#   socket(AF_ALG) -> errno 97. Not for: Adiantum / Serpent / Twofish LUKS volumes,
+#   BlueZ mesh, iwd.
+sec_kargs() {
+  local a
+  if (( ${#KERNEL_ARGS[@]} == 0 )); then log "KERNEL_ARGS empty: nothing to add"; return; fi
+  for a in "${KERNEL_ARGS[@]}"; do add_karg "$a"; done
+  log "new args work from the next boot; boot or unlock fails: previous entry in GRUB (Esc / Shift)"
 }
 
 # -----------------------------------------------------------------------------
@@ -731,6 +765,7 @@ main() {
       mic)         sec_mic ;;
       netprivacy)  sec_netprivacy ;;
       time)        sec_time ;;
+      kargs)       sec_kargs ;;
       *)           warn "unknown section: $s" ;;
     esac
   done

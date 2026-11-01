@@ -9,6 +9,15 @@
 - `-F arch=b64`-only rules miss 32-bit programs (Steam). Use `-w` for file watches or list both arches.
 - `auditctl -R` stops at the first failing rule → put `-c` in `01-continue.rules`.
 - `augenrules` always moves `-D` first and `-e` last.
+- `ausearch -k <key>` also returns the `CONFIG_CHANGE` events of `auditctl` adding the
+  rule (same key), and `-m SYSCALL` still shows them (auditctl's own syscall record).
+  Filter on the syscall: `ausearch -k af-alg -sc socket`.
+- Rules added with `auditctl` are gone after a reboot; a file in `/etc/audit/rules.d/`
+  also covers services that start before login.
+- `/proc/crypto` lists the kernel's own algorithms (dm-crypt uses `xts(aes)`): it does
+  not change when AF_ALG is off. Test with a socket (`socket(AF_ALG)` -> errno 97).
+- `initcall_blacklist=<fn>` skips a built-in init function at boot (needs
+  CONFIG_KALLSYMS). One karg per function, or a comma list in one.
 
 ## OpenSCAP
 
