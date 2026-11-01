@@ -189,3 +189,22 @@ Counters reset every boot -> use `hostfw report` (reads kernel journal).
 - Docs: addresses, wifi names, interface and server names replaced by descriptions.
 - check-private-info.sh: only standard blocks (RFC 1918, CGNAT, link-local, multicast,
   libvirt default, RFC 5737 examples) pass; public resolvers no longer allowed.
+
+## 2026-11-01: split tunneling test (mullvad-exclude)
+- Found via the audit rule count: 73 loaded, 72 expected. `privileged` list = 28 rules,
+  one is `/usr/bin/mullvad-exclude`: `-rwsr-xr-x root:root`, package mullvad-vpn 2026.5
+  (installed after the count of 70). Setuid list is built when `audit-rules` runs.
+- Test as uid 1000: `mullvad-exclude curl -v --max-time 10 https://am.i.mullvad.net/connected`
+  - HFW-OUT-NEW: SYN tcp/443 OUT=wg0-mullvad, tunnel source address, UID=1000,
+    MARK=0x6d6f6c65 -> the helper set the mark, the flow still left via the tunnel.
+  - nothing on the uplink: out_wg 4 and out_leak 1 before and after (that one line =
+    the known ICMP to the relay, uid 0).
+  - TCP up, reset after the TLS Client Hello (curl 35). Reset source not checked.
+  - `ip rule`: `not from all fwmark 0x6d6f6c65 lookup 1836018789` -> marked traffic should
+    use main (uplink). Why it stayed in the tunnel: not checked.
+- `out_wg` on the host: `meta mark @wg_fwmark ct mark != 0x00000f41` (same as the netns
+  test 2026-10-26: ct mark 0xf41 + mark -> out_leak).
+- Result: no leak. Two layers: excluded flow stayed in the tunnel; on the uplink out_wg
+  skips split tunneling -> out_leak (rejected in enforce).
+- IN-NOISE this boot (`journalctl -k -b -g '^HFW-IN-NOISE'`, sender MAC + address): 359 from
+  the TV (UDP 25860 broadcast, see Expected), 1 from a device with a random MAC.

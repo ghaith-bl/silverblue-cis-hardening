@@ -49,7 +49,7 @@ Not used: split tunneling, custom DNS, DNS content blockers, Allow LAN.
 | API outside the tunnel | uid 0 tcp/443 to the API address, no mark | `vpn_api4` (local.conf) -> `out_vpn_api` |
 | routing | `not fwmark 0x6d6f6c65 lookup 1836018789` (table id = the mark) | - |
 | kill switch | table `inet mullvad`, policy drop in / out / forward | not touched |
-| split tunneling | ct mark 0xf41 + mark 0x6d6f6c65 | not accepted -> out_leak |
+| split tunneling | `mullvad-exclude` (setuid root), ct mark 0xf41 + mark 0x6d6f6c65 | not accepted -> out_leak |
 
 - Relay transport carries the mark (only privileged processes can set it, Mullvad
   docs/security.md) -> out_wg.
@@ -65,6 +65,10 @@ Not used: split tunneling, custom DNS, DNS content blockers, Allow LAN.
   (seen 2026-10-27: public DoH resolvers tcp/443, proxy on another port) -> out_leak.
   Disabled in the app; if `mullvad api-access get` shows anything but Direct, the daemon
   switched after Direct failed.
+- `mullvad-exclude` ships setuid root with the package (any local user can start a program
+  outside the tunnel). Audited (`privileged` list, watch rule `split-tunnel` in sectop).
+  Test 2026-11-01 (firewall/docs/observe-log.md): the excluded flow stayed in the tunnel,
+  nothing on the uplink.
 - ICMP echo TTL=1 to the relay on the uplink, uid 0, no mark (before / at connect): rejected,
   connect not affected.
 - `inet mullvad` and `inet hostfw` both filter: a packet leaves only if both accept.

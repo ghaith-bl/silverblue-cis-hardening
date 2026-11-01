@@ -62,7 +62,7 @@ rate limit   10/min burst 20 per rule (noise: 6/min burst 10) -> counters are ex
 mark needs CAP_NET_ADMIN). Its API calls outside the tunnel have no mark: `out_vpn_api`
 allows them the way `inet mullvad` does (uid 0, tcp 443, one address), nothing else. Split tunneling
 (`mullvad-exclude`) sets the same mark plus ct mark 0xf41 -> not accepted here, ends in
-out_lan / out_leak (not used on this host).
+out_lan / out_leak (not used on this host; test 2026-11-01: observe-log.md).
 
 ## forward
 

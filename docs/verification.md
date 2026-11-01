@@ -20,7 +20,8 @@ Tests run after hardening + reboot. All passed.
 
 | Check | Command | Expected |
 |-------|---------|----------|
-| audit rules loaded | `sudo auditctl -l \| wc -l` | ~72 |
+| audit rules loaded | `sudo auditctl -l \| wc -l` | ~73 |
+| setuid / setgid audited | `sudo auditctl -l \| grep -c 'key=privileged'` | `find /usr -xdev -type f \( -perm -4000 -o -perm -2000 \) \| wc -l` (28 on 2026-11-01) |
 | audit at boot | `grep -o 'audit[^ ]*' /proc/cmdline` | `audit=1`, `audit_backlog_limit=8192` |
 | syscall auditing on | `sudo auditctl -l \| grep -c 'never,task'` | `0` |
 | audit log ring | `sudo grep -e ^max_log_file -e ^num_logs /etc/audit/auditd.conf` | `max_log_file = 32`, `num_logs = 40`, `max_log_file_action = ROTATE` |
