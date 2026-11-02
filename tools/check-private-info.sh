@@ -20,6 +20,9 @@
 # Run from another repo (the script stays here):
 #   cd ~/other-repo && ~/path/to/check-private-info.sh --tree
 #
+# CI (not my machine): PRIVATE_INFO_GENERIC=1 skips the machine values (they would
+# be the runner's user, interfaces, addresses), only the generic patterns run.
+#
 # Allow list: .private-info-allow at the root of the scanned repo (optional).
 # A finding someone reviewed and accepted, one per line:
 #   <label> <path glob> <value regex>
@@ -83,7 +86,7 @@ ALLOW=".private-info-allow"
     printf '\0#HIST\0'
     git log --all -p --no-color --unified=0 --format='@@COMMIT %h' -- . ":(exclude)$SELF"
   fi
-} | MACHINE="$(collect)" SELF="$SELF" ALLOW="$ALLOW" python3 -c '
+} | MACHINE="$([ "${PRIVATE_INFO_GENERIC:-}" = 1 ] || collect)" SELF="$SELF" ALLOW="$ALLOW" python3 -c '
 import fnmatch, os, re, sys
 
 machine = []

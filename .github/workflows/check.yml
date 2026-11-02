@@ -29,5 +29,7 @@ jobs:
           shellcheck -S warning harden-workstation.sh tools/*.sh firewall/*.sh browsers/*.sh \
             firewall/nm-dispatcher/90-hostfw-sync
 
-      - name: private info (working tree)
+      - name: private info (working tree, generic patterns)
+        env:
+          PRIVATE_INFO_GENERIC: "1"
         run: tools/check-private-info.sh --tree
