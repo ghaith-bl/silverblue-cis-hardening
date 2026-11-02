@@ -20,7 +20,8 @@ Remaining `fail` items (approx.):
 - ~55 intentional deviations → [docs/deviations.md](docs/deviations.md)
 - ~16 scanner false positives on Silverblue (config read from the wrong place, syscalls that do not exist on x86_64)
 - ~17 audit rules that are loaded and verified working, but written in a different format than the scanner matches
-- the rest: backlog / optional (AIDE, crypto-policy module, GRUB password, umask)
+- the rest: backlog / optional (AIDE, crypto-policy module, umask); GRUB password set by hand
+  since 2026-11-01 (`grub2-setpassword`)
 
 ## Environment
 
@@ -61,7 +62,7 @@ sudo ./harden-workstation.sh all
 | `IDLE_LOCK_SECONDS`    | `900`      | GNOME idle lock |
 | `MAC_MODE`             | `random`   | `random` = new MAC on every connect, `stable-ssid` = one per Wi-Fi network |
 | `GENERIC_HOSTNAME`     | `localhost`| hostname a new network may see on its first connect; `""` = keep mine |
-| `KERNEL_ARGS`          | `(initcall_blacklist=af_alg_init)` | kernel args of the `kargs` section; `()` = none |
+| `KERNEL_ARGS`          | `(initcall_blacklist=af_alg_init page_alloc.shuffle=1 rd.shell=0 rd.emergency=halt)` | kernel args of the `kargs` section; `()` = none |
 
 ### Recommended order (low → high risk)
 
@@ -73,6 +74,7 @@ sudo ./harden-workstation.sh gnome su # then: su - (must fail), sudo true
 sudo ./harden-workstation.sh pam      # with a root shell open
 sudo ./harden-workstation.sh netprivacy  # close Brave first, then log out and in
 sudo ./harden-workstation.sh time     # VPN connected; then chronyc -N authdata
+sudo grub2-setpassword                # by hand, before kargs (user root at the menu)
 sudo ./harden-workstation.sh kargs    # then reboot: LUKS unlock, Wi-Fi, VPN, a VM
 ```
 
@@ -97,7 +99,7 @@ sudo ./harden-workstation.sh kargs    # then reboot: LUKS unlock, Wi-Fi, VPN, a 
 | `mic`         | WirePlumber rule disables capture nodes | no microphone |
 | `netprivacy`  | not CIS: random MAC (Wi-Fi + cable), no hostname in DHCP (every profile), generic hostname (also as fallback, kernel arg: from the first second of boot), DHCP ids from that MAC, IPv6 temporary addresses, LLMNR + mDNS off in resolved, no DNS servers in Wi-Fi / cable profiles (only the tunnel) | new device on the router at every connect: no DHCP reservation; prompt shows `localhost`; no DNS without the tunnel |
 | `time`        | chrony: NTS only (Netnod + PTB), `authselectmode require`, `minsources 2`, no pool, no NTP servers from DHCP | no time sync without the tunnel (RTC keeps time) |
-| `kargs`       | not CIS: kernel args from `KERNEL_ARGS` via `rpm-ostree kargs` (next boot). `initcall_blacklist=af_alg_init`: AF_ALG (kernel crypto API from user space) off | `socket(AF_ALG)` fails; no Adiantum / Serpent / Twofish LUKS, BlueZ mesh, iwd |
+| `kargs`       | not CIS: kernel args from `KERNEL_ARGS` via `rpm-ostree kargs` (next boot). `initcall_blacklist=af_alg_init`: AF_ALG (kernel crypto API from user space) off; `page_alloc.shuffle=1`: random page allocator; `rd.shell=0 rd.emergency=halt`: no initramfs root shell | `socket(AF_ALG)` fails; no Adiantum / Serpent / Twofish LUKS, BlueZ mesh, iwd; boot failure halts (fix: previous GRUB entry, or `e` + GRUB password) |
 
 ## Rollback
 
@@ -116,6 +118,8 @@ sudo hostnamectl set-hostname <name>             # per profile: nmcli con modify
 sudo nmcli con modify <uuid> ipv4.ignore-auto-dns no   # router DNS back (or old profile: backup system-connections)
 sudo cp /var/backups/hardening/<time>/etc/chrony.conf /etc/ && sudo systemctl restart chronyd
 sudo rpm-ostree kargs --delete=initcall_blacklist=af_alg_init   # then reboot
+sudo rpm-ostree kargs --delete=page_alloc.shuffle=1 --delete=rd.shell=0 --delete=rd.emergency=halt
+sudo rm /boot/grub2/user.cfg                     # GRUB password off
 sudo rpm-ostree rollback                         # after booting the previous GRUB entry
 sudo ostree admin config-diff                    # every /etc change vs. image defaults
 ```

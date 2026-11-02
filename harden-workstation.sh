@@ -40,7 +40,8 @@ IDLE_LOCK_SECONDS=900        # screen locks after 15 minutes idle
 MAC_MODE="random"            # "random" = new MAC on every connect (Wi-Fi + cable)
                              # "stable-ssid" = same random MAC per Wi-Fi network (Fedora default)
 GENERIC_HOSTNAME="localhost" # hostname every network may see; "" = keep the current one
-KERNEL_ARGS=(initcall_blacklist=af_alg_init)   # kargs section; () = add none
+KERNEL_ARGS=(initcall_blacklist=af_alg_init page_alloc.shuffle=1 rd.shell=0 rd.emergency=halt)
+                             # kargs section; () = add none
 TARGET_USER="${SUDO_USER:-}" # your login user (taken from sudo)
 
 BACKUP_ROOT="/var/backups/hardening/$(date +%Y%m%d-%H%M%S)"
@@ -98,17 +99,24 @@ mask_units() {
 
 user_home() { getent passwd "$1" | cut -d: -f6; }
 
-# add_karg <arg>   rpm-ostree: new deployment, used from the next boot; the old one stays in GRUB
+# add_karg <arg>...   rpm-ostree: one new deployment for all missing args, used from the
+# next boot; the deployment booted now stays in GRUB (rollback)
 add_karg() {
-  local karg="$1"
+  local karg have
+  local -a missing=()
   if ! command -v rpm-ostree >/dev/null; then
-    warn "no rpm-ostree: add kernel arg $karg yourself"
-  elif rpm-ostree kargs | grep -qwF -- "$karg"; then
-    log "kernel arg $karg already set"
-  elif rpm-ostree kargs --append="$karg" >/dev/null; then
-    log "kernel arg $karg added (used from the next boot)"
+    warn "no rpm-ostree: add kernel args yourself: $*"; return 0
+  fi
+  have=" $(rpm-ostree kargs) "
+  for karg in "$@"; do
+    if [[ $have == *" $karg "* ]]; then log "kernel arg $karg already set"
+    else missing+=("--append=$karg"); fi
+  done
+  (( ${#missing[@]} )) || return 0
+  if rpm-ostree kargs "${missing[@]}" >/dev/null; then
+    log "kernel args added (used from the next boot): ${missing[*]#--append=}"
   else
-    warn "rpm-ostree kargs --append=$karg failed"
+    warn "rpm-ostree kargs ${missing[*]} failed"
   fi
 }
 
@@ -719,10 +727,19 @@ EOF
 #   >= 2.8.7 falls back to a userspace library). Test 2026-11-01: boot + unlock OK,
 #   socket(AF_ALG) -> errno 97. Not for: Adiantum / Serpent / Twofish LUKS volumes,
 #   BlueZ mesh, iwd.
+#   page_alloc.shuffle=1: page allocator free lists in random order (built in with
+#   CONFIG_SHUFFLE_PAGE_ALLOCATOR, off by default): harder to predict where an object
+#   lands in memory. Check: /sys/module/page_alloc/parameters/shuffle = Y.
+#   rd.shell=0 rd.emergency=halt: a failure in the initramfs halts the machine instead of
+#   a root shell (dracut.cmdline(7); rd.emergency needs rd.shell=0). That shell may run
+#   after the LUKS unlock. Only worth it with a GRUB password (grub2-setpassword, by
+#   hand): without one anyone at the menu removes these args. Rollback still works:
+#   boot entries stay unrestricted, only edit / command line / firmware entry ask.
+#   Idea source: secureblue default kargs, minus what the Fedora kernel config already
+#   does (init_on_alloc, slab_nomerge, randomize_kstack_offset).
 sec_kargs() {
-  local a
   if (( ${#KERNEL_ARGS[@]} == 0 )); then log "KERNEL_ARGS empty: nothing to add"; return; fi
-  for a in "${KERNEL_ARGS[@]}"; do add_karg "$a"; done
+  add_karg "${KERNEL_ARGS[@]}"
   log "new args work from the next boot; boot or unlock fails: previous entry in GRUB (Esc / Shift)"
 }
 

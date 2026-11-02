@@ -90,4 +90,17 @@ Input for an OpenSCAP tailoring file.
   Cost: no Adiantum / Serpent / Twofish LUKS volumes, no BlueZ mesh, no iwd, no
   `cryptsetup benchmark` for ciphers. Undo: `rpm-ostree kargs --delete=...`, reboot.
 - Audit rule `af-alg` kept after the block: every hit is a failed try (a program that
-  needs it, or a probe). My design, not from CIS or Red Hat. Rules: ~72.
+  needs it, or a probe). My design, not from CIS or Red Hat. Rules: ~72 (73 with
+  `mullvad-exclude` in the setuid list, 2026-11-01).
+- `page_alloc.shuffle=1` (kargs, 2026-11-01): random page allocator free lists. Built in
+  (`CONFIG_SHUFFLE_PAGE_ALLOCATOR`), off by default. Cost: none expected.
+- `rd.shell=0 rd.emergency=halt` (kargs, 2026-11-01): initramfs failure halts, no root
+  shell (may run after the LUKS unlock). Needs the GRUB password (CIS `grub2_password`,
+  set by hand with `grub2-setpassword`, user `root`): without it the menu edits them
+  away. Normal boot and older entries ask nothing; edit (`e`), command line (`c`) and
+  the firmware entry ask. Cost: no shell to debug a broken boot; fix = previous GRUB
+  entry (`rpm-ostree rollback`) or `e` + password, remove the args for one boot.
+- Source of the kargs ideas: secureblue default kargs (compared 2026-10-30), minus what
+  the Fedora kernel config already does. Not taken: `ia32_emulation=0` (Steam),
+  `nosmt` (half the cores), `vsyscall=none` (kernel already xonly), `module.sig_enforce`
+  (lockdown integrity). Later, measured first: `iommu.strict=1`, `init_on_free=1`.
