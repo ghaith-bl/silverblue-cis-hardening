@@ -20,7 +20,6 @@ OUT="$HOME/browser-settings-report.txt"
 command -v python3 >/dev/null || { echo "python3 not found" >&2; exit 1; }
 
 BRAVE_ROOTS=(
-  "$HOME/.var/app/com.brave.Browser/config/BraveSoftware/Brave-Browser"
   "${XDG_CONFIG_HOME:-$HOME/.config}/BraveSoftware/Brave-Browser"
 )
 FF_ROOTS=(
@@ -45,15 +44,10 @@ echo "# whitelisted keys only; no personal data"
 
 # ===========================================================================
 hd "BRAVE - install"
-if command -v flatpak >/dev/null 2>&1 && flatpak info com.brave.Browser >/dev/null 2>&1; then
-  echo "flatpak: $(flatpak info com.brave.Browser 2>/dev/null | awk -F': ' '/Version:/{print $2; exit}')"
-  echo "-- effective filesystem permissions:"
-  flatpak info --show-permissions com.brave.Browser 2>/dev/null | grep -E '^filesystems=' | tr ';' '\n' | sed 's/^/   /'
-  echo "-- user/system overrides:"
-  { flatpak override --user   --show com.brave.Browser 2>/dev/null
-    flatpak override --system --show com.brave.Browser 2>/dev/null; } | sed 's/^/   /' | grep . || echo "   (none)"
+if command -v rpm >/dev/null 2>&1 && rpm -q brave-browser >/dev/null 2>&1; then
+  echo "rpm: $(rpm -q brave-browser)"
 else
-  command -v brave-browser >/dev/null 2>&1 && echo "native: $(brave-browser --version 2>/dev/null)" || echo "(brave not found)"
+  echo "(rpm brave-browser not found)"
 fi
 
 hd "BRAVE - system policies"
@@ -70,7 +64,7 @@ for root in "${BRAVE_ROOTS[@]}"; do
 import json, os, sys, glob
 
 root = sys.argv[1]
-print("location:", "flatpak" if "/.var/app/" in root else "native")
+print("location: native")
 
 def load(p):
     try:

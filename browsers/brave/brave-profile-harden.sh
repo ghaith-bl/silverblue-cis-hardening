@@ -20,9 +20,7 @@
 #
 set -euo pipefail
 
-APP="com.brave.Browser"
-FLAT_ROOT="$HOME/.var/app/$APP/config/BraveSoftware/Brave-Browser"
-NATIVE_ROOT="$HOME/.config/BraveSoftware/Brave-Browser"
+ROOT="${XDG_CONFIG_HOME:-$HOME/.config}/BraveSoftware/Brave-Browser"
 POLICY_FILE="/etc/brave/policies/managed/policies.json"
 
 ok(){ printf '\033[32m  ok \033[0m %s\n' "$*"; }
@@ -33,29 +31,18 @@ hd(){ printf '\n\033[1m== %s ==\033[0m\n' "$*"; }
 command -v python3 >/dev/null || { er "python3 not found"; exit 1; }
 
 find_root(){
-  if   [ -d "$FLAT_ROOT" ];   then echo "$FLAT_ROOT"
-  elif [ -d "$NATIVE_ROOT" ]; then echo "$NATIVE_ROOT"
+  if [ -d "$ROOT" ]; then echo "$ROOT"
   else
     er "no Brave profile directory found"
-    echo "     looked in: $FLAT_ROOT" >&2
-    echo "                $NATIVE_ROOT" >&2
+    echo "     looked in: $ROOT" >&2
     exit 1
   fi
 }
 
-brave_running(){
-  if command -v flatpak >/dev/null 2>&1 &&
-     flatpak ps --columns=application 2>/dev/null | grep -qx "$APP"; then
-    return 0
-  fi
-  pgrep -x brave >/dev/null 2>&1 || pgrep -f '/brave-browser/brave' >/dev/null 2>&1
-}
-
 check_closed(){
-  if brave_running; then
+  if pgrep -x brave >/dev/null 2>&1; then
     er "Brave is running. Close it completely first:"
-    echo "       flatpak kill $APP   (flatpak)" >&2
-    echo "       pkill -x brave      (native)" >&2
+    echo "       pkill -x brave" >&2
     exit 1
   fi
 }
@@ -91,7 +78,7 @@ policy_status(){
     else
       er "$POLICY_FILE is NOT valid JSON - Brave ignores the whole file"
     fi
-    [ -L "$POLICY_FILE" ] && nn "it is a symlink - the flatpak wrapper needs a regular file"
+    [ -L "$POLICY_FILE" ] && nn "it is a symlink - install-policies.sh installs a regular file"
   else
     nn "$POLICY_FILE missing - run browsers/install-policies.sh"
   fi

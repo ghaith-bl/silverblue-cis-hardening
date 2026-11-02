@@ -22,8 +22,8 @@ Input for an OpenSCAP tailoring file.
 | `accounts_maximum_age_login_defs`, `accounts_minimum_age_login_defs`, `accounts_password_set_max_life_existing`, `accounts_password_set_min_life_existing` | skip | NIST SP 800-63B advises against forced periodic password changes |
 | `account_disable_post_pw_expiration` | skip | risk of locking out the only account |
 | `accounts_tmout` | skip | GNOME idle lock (15 min, locked) covers it |
-| `banner_etc_issue_cis`, `banner_etc_issue_net_cis`, `dconf_gnome_banner_enabled`, `dconf_gnome_login_banner_text`, `sshd_enable_warning_banner_net` | skip | legal banners — value in organisations, not on a personal device |
-| `package_systemd-journal-remote_installed` | skip (later) | needs a log server — planned for the homelab |
+| `banner_etc_issue_cis`, `banner_etc_issue_net_cis`, `dconf_gnome_banner_enabled`, `dconf_gnome_login_banner_text`, `sshd_enable_warning_banner_net` | skip | legal banners - value in organisations, not on a personal device |
+| `package_systemd-journal-remote_installed` | skip (later) | needs a log server - planned for the homelab |
 | `accounts_passwords_pam_faillock_even_deny_root_or_root_unlock_time` | skip | root account is locked; `su` restricted to an empty group |
 | `ensure_root_password_configured` | skip | root is locked; emergency shell refuses access instead of opening unauthenticated |
 | `service_bluetooth_disabled` | skip | service already disabled manually; masking optional |
@@ -47,12 +47,12 @@ Input for an OpenSCAP tailoring file.
 | Rule | Why it fails | Verification |
 |------|--------------|--------------|
 | `grub2_audit_argument`, `grub2_audit_backlog_limit_argument` | checks GRUB files; Silverblue sets kargs via `rpm-ostree kargs` | `grep -o 'audit[^ ]*' /proc/cmdline` |
-| `audit_rules_kernel_module_loading_create`, `..._query` | `create_module` / `query_module` do not exist on x86_64 | — |
+| `audit_rules_kernel_module_loading_create`, `..._query` | `create_module` / `query_module` do not exist on x86_64 | - |
 | `ensure_fedora_gpgkey_installed` | ostree verifies commits with its own remote keys | `grep -r gpg-verify /etc/ostree/remotes.d/` |
 | `package_cron_installed` | `cronie` is layered | `rpm -q cronie` |
-| `sysctl_kernel_yama_ptrace_scope`, `sysctl_fs_suid_dumpable` | conflicting defaults in `/usr/lib/sysctl.d/` (`10-default-yama-scope.conf` sets `0`); ours loads last | `sysctl kernel.yama.ptrace_scope fs.suid_dumpable` → `2`, `0` |
-| `file_groupownership_sshd_private_key` | Fedora uses group `ssh_keys` by design | — |
-| `sshd_*` | sshd is masked; hardened drop-in present | `systemctl is-enabled sshd` → `masked` |
+| `sysctl_kernel_yama_ptrace_scope`, `sysctl_fs_suid_dumpable` | conflicting defaults in `/usr/lib/sysctl.d/` (`10-default-yama-scope.conf` sets `0`); ours loads last | `sysctl kernel.yama.ptrace_scope fs.suid_dumpable` -> `2`, `0` |
+| `file_groupownership_sshd_private_key` | Fedora uses group `ssh_keys` by design | - |
+| `sshd_*` | sshd is masked; hardened drop-in present | `systemctl is-enabled sshd` -> `masked` |
 | ~17 `audit_rules_*` | rules loaded, different text format than the scanner regex | `sudo auditctl -l`, `ausearch -k <key>` |
 
 ## Mullvad VPN (replaced Proton VPN 2026-10-26, docs/mullvad.md)
@@ -78,6 +78,15 @@ Input for an OpenSCAP tailoring file.
   Cost: no DNS without the tunnel (captive portals: already closed by lockdown). New
   networks get DHCP DNS: run netprivacy again.
 - hostfw observe week ended after 1 day (2026-10-19). Findings: firewall/docs/observe-log.md.
+
+## Brave: RPM, not Flatpak (not CIS)
+- Brave's own RPM repo, layered (browsers/README.md). Why: Brave's own build with the
+  browser's own sandbox, fully native; Brave recommends its repos over the Flathub
+  build, which changes Chromium sandboxing in ways not reviewed by Brave or Chromium.
+- Cost: no Flatpak file limits (the browser runs as my user, whole home readable);
+  updates only with an rpm-ostree deployment + reboot -> update often.
+- Repo: `gpgcheck=1` + `repo_gpgcheck=1` (signed metadata, refresh OK 2026-11-02), the
+  3 key fingerprints match brave.com/signing-keys.
 
 ## Kernel args (not CIS)
 - `initcall_blacklist=af_alg_init` (kargs section, 2026-11-01): AF_ALG never starts.

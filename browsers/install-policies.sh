@@ -9,10 +9,7 @@
 #   ./browsers/install-policies.sh --check        read-only status
 #   --force   install Brave policy even if installed extensions would be removed
 #
-# Brave   (flatpak com.brave.Browser) -> /etc/brave/policies/managed/policies.json
-#         The Flathub wrapper (brave.sh) links /run/host/etc/brave/policies/managed/*.json
-#         into the sandbox at start. Needs the app's default "host-etc" permission,
-#         and a REGULAR file - not a symlink.
+# Brave   (rpm brave-browser, Brave's own repo) -> /etc/brave/policies/managed/policies.json
 # Firefox (rpm, Silverblue base image) -> /etc/firefox/policies/policies.json
 #
 # Existing files are backed up to /var/backups/hardening/<timestamp>/ (same as
@@ -25,7 +22,6 @@ BRAVE_SRC="$HERE/brave/policies.json"
 BRAVE_DST="/etc/brave/policies/managed/policies.json"
 FF_SRC="$HERE/firefox/policies.json"
 FF_DST="/etc/firefox/policies/policies.json"
-BRAVE_APP="com.brave.Browser"
 BACKUP_DIR="/var/backups/hardening/$(date +%Y%m%d-%H%M%S)"
 
 ok(){ printf '\033[32m  ok \033[0m %s\n' "$*"; }
@@ -35,12 +31,8 @@ hd(){ printf '\n\033[1m== %s ==\033[0m\n' "$*"; }
 
 valid_json(){ python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$1" 2>/dev/null; }
 
-brave_host_etc(){
-  command -v flatpak >/dev/null 2>&1 || return 2
-  flatpak info "$BRAVE_APP" >/dev/null 2>&1 || return 2
-  # effective permissions = manifest + system/user overrides
-  flatpak info --show-permissions "$BRAVE_APP" 2>/dev/null \
-    | grep -E '^filesystems=' | grep -qE '(^|[=;])host-etc(:ro)?(;|$)'
+brave_rpm(){
+  command -v rpm >/dev/null 2>&1 && rpm -q brave-browser 2>/dev/null
 }
 
 install_one(){
@@ -60,13 +52,9 @@ install_one(){
 
 do_brave(){
   hd "Brave"
-  local r=0; brave_host_etc || r=$?
-  case $r in
-    0) ok "flatpak $BRAVE_APP can read host /etc" ;;
-    1) nn "flatpak $BRAVE_APP has NO host-etc access - policies will be ignored"
-       echo "       an override removed it; check: flatpak override --show $BRAVE_APP" ;;
-    *) nn "flatpak $BRAVE_APP not found - file still installed for a native Brave" ;;
-  esac
+  local v
+  if v="$(brave_rpm)"; then ok "rpm Brave: $v"
+  else nn "rpm brave-browser not found - file installed anyway"; fi
   brave_extension_guard || return 1
   install_one "$BRAVE_SRC" "$BRAVE_DST"
   echo "   restart Brave, then open brave://policy"
@@ -79,8 +67,7 @@ brave_extension_guard(){
   local user="${SUDO_USER:-$(id -un)}" home
   home="$(getent passwd "$user" | cut -d: -f6)"
   local missing
-  missing="$(python3 - "$BRAVE_SRC" "$home/.var/app/$BRAVE_APP/config/BraveSoftware/Brave-Browser" \
-                     "$home/.config/BraveSoftware/Brave-Browser" <<'PY'
+  missing="$(python3 - "$BRAVE_SRC" "$home/.config/BraveSoftware/Brave-Browser" <<'PY'
 import glob, json, os, sys
 pol = json.load(open(sys.argv[1]))
 if "*" not in pol.get("ExtensionInstallBlocklist", []):
@@ -136,11 +123,8 @@ check(){
     elif cmp -s "$src" "$dst";     then ok "$dst matches repo"
     else                                nn "$dst differs from repo copy"; fi
   done
-  local r=0; brave_host_etc || r=$?
-  case $r in
-    0) ok "Brave flatpak has host-etc" ;;
-    1) nn "Brave flatpak has NO host-etc" ;;
-  esac
+  local v
+  if v="$(brave_rpm)"; then ok "rpm Brave: $v"; else nn "rpm brave-browser not found"; fi
 }
 
 FORCE=0
