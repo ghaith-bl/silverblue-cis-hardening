@@ -58,8 +58,8 @@ Input for an OpenSCAP tailoring file.
 ## Mullvad VPN (replaced Proton VPN 2026-10-26, docs/mullvad.md)
 - mullvad-daemon runs as root (owns its nftables table, routes, DNS). Package unit,
   not changed.
-- Management socket: any local user can talk to the daemon (connect, disconnect,
-  settings). Single-user laptop; planned: limit it to one group.
+- Management socket: only group `mullvad` (mullvad section, 2026-11-02). Mullvad's
+  default: any local user can connect, disconnect and change settings.
 - The RPM ships the GUI too (one package). Not started, no autostart.
 - API access: only "Direct" enabled; "Mullvad Bridges" and "Encrypted DNS proxy" disabled
   (2026-10-27). My design, not from Mullvad, CIS or Red Hat docs. Why: hostfw allows the

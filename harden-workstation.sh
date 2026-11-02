@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # harden-workstation.sh
-# CIS Fedora Benchmark L2 (Workstation) — tailored for:
+# CIS Fedora Benchmark L2 (Workstation) - tailored for:
 #   Fedora Silverblue 44, KVM/libvirt, Steam (Flatpak), Mullvad VPN (WireGuard)
 #
 # Usage:
@@ -24,7 +24,7 @@
 set -euo pipefail
 
 # -----------------------------------------------------------------------------
-# Decisions — review before running
+# Decisions - review before running
 # -----------------------------------------------------------------------------
 DISABLE_USB_STORAGE="no"     # "yes" = USB flash drives / external disks stop working
 DISABLE_BLUETOOTH="no"       # "yes" = no Bluetooth headsets / game controllers
@@ -42,10 +42,12 @@ MAC_MODE="random"            # "random" = new MAC on every connect (Wi-Fi + cabl
 GENERIC_HOSTNAME="localhost" # hostname every network may see; "" = keep the current one
 KERNEL_ARGS=(initcall_blacklist=af_alg_init page_alloc.shuffle=1 rd.shell=0 rd.emergency=halt)
                              # kargs section; () = add none
+MULLVAD_SOCKET_GROUP="mullvad"  # mullvad section: only this group may use the Mullvad CLI / GUI
+                             # "" = any local user (Mullvad's default)
 TARGET_USER="${SUDO_USER:-}" # your login user (taken from sudo)
 
 BACKUP_ROOT="/var/backups/hardening/$(date +%Y%m%d-%H%M%S)"
-SECTIONS=(sysctl modules coredump journald gnome sudo pam su services cron sshd auditd audit-rules perms mic netprivacy time kargs)
+SECTIONS=(sysctl modules coredump journald gnome sudo pam su services cron sshd auditd audit-rules perms mic netprivacy mullvad time kargs)
 
 # -----------------------------------------------------------------------------
 # Helpers
@@ -173,7 +175,7 @@ net.ipv6.conf.default.accept_source_route = 0
 net.ipv6.conf.all.forwarding = 0
 net.ipv6.conf.default.forwarding = 0
 EOF
-  if sysctl --system >/dev/null; then log "sysctl applied"; else warn "some sysctl keys failed — run: sudo sysctl --system"; fi
+  if sysctl --system >/dev/null; then log "sysctl applied"; else warn "some sysctl keys failed - run: sudo sysctl --system"; fi
 }
 
 sec_modules() {
@@ -249,7 +251,7 @@ EOF
 disable-user-list=true
 EOF
   else
-    warn "gdm dconf profile not found — skipped hiding the login user list"
+    warn "gdm dconf profile not found - skipped hiding the login user list"
   fi
   dconf update && log "dconf databases updated (log out/in to see changes)"
 }
@@ -266,10 +268,10 @@ EOF
     write_file /etc/sudoers.d/90-cis 0440 < "$tmp"
     if ! visudo -cq; then
       rm -f /etc/sudoers.d/90-cis
-      die "full sudoers check failed — removed /etc/sudoers.d/90-cis"
+      die "full sudoers check failed - removed /etc/sudoers.d/90-cis"
     fi
   else
-    warn "sudoers snippet failed validation — not installed"
+    warn "sudoers snippet failed validation - not installed"
   fi
   rm -f "$tmp"
 }
@@ -277,7 +279,7 @@ EOF
 sec_pam() {
   local profile feat
   if ! authselect check >/dev/null 2>&1; then
-    warn "authselect reports manual PAM edits — skipping PAM section"
+    warn "authselect reports manual PAM edits - skipping PAM section"
     return 0
   fi
   profile=$(authselect current --raw | awk '{print $1}')
@@ -321,7 +323,7 @@ sec_pam() {
 sec_su() {
   groupadd -f sugroup
   if [[ -n "$(getent group sugroup | cut -d: -f4)" ]]; then
-    warn "group sugroup has members — su rule not added"
+    warn "group sugroup has members - su rule not added"
     return 0
   fi
   if grep -Eq '^auth[[:space:]]+required[[:space:]]+pam_wheel\.so.*group=sugroup' /etc/pam.d/su; then
@@ -333,7 +335,7 @@ sec_su() {
   if grep -q 'group=sugroup' /etc/pam.d/su; then
     log "su restricted to the empty group sugroup (use sudo instead)"
   else
-    warn "pam_rootok line not found in /etc/pam.d/su — nothing changed"
+    warn "pam_rootok line not found in /etc/pam.d/su - nothing changed"
   fi
 }
 
@@ -385,7 +387,7 @@ EOF
   if command -v sshd >/dev/null && compgen -G '/etc/ssh/ssh_host_*_key' >/dev/null; then
     if ! sshd -t; then
       rm -f /etc/ssh/sshd_config.d/40-cis.conf
-      warn "sshd -t failed — removed 40-cis.conf"
+      warn "sshd -t failed - removed 40-cis.conf"
     fi
   fi
   # Only the SSH *server* is affected; the ssh client (outgoing connections) is untouched.
@@ -425,7 +427,7 @@ EOF
 
   write_file "$d/50-cis-workstation.rules" 0640 <<'EOF'
 ## =====================================================================
-## CIS L2 workstation audit rules — file watches (-w) cover 32-bit and
+## CIS L2 workstation audit rules - file watches (-w) cover 32-bit and
 ## 64-bit programs; syscall rules list both arches explicitly.
 ## =====================================================================
 
@@ -498,7 +500,7 @@ EOF
 EOF
 
   {
-    echo "## setuid/setgid programs under /usr — regenerate after major upgrades"
+    echo "## setuid/setgid programs under /usr - regenerate after major upgrades"
     find /usr -xdev -type f \( -perm -4000 -o -perm -2000 \) 2>/dev/null | sort |
       awk '{print "-a always,exit -F path=" $0 " -F perm=x -F auid>=1000 -F auid!=unset -k privileged"}'
   } | write_file "$d/55-privileged.rules" 0640
@@ -540,11 +542,11 @@ EOF
 
   chmod 0640 "$d"/*.rules
   if ! augenrules --load >/dev/null; then
-    warn "augenrules reported an error — run: sudo augenrules --load"
+    warn "augenrules reported an error - run: sudo augenrules --load"
   fi
   n=$(auditctl -l | grep -vc '^No rules' || true)
   log "audit rules loaded in kernel: $n"
-  if (( n < 40 )); then warn "fewer rules than expected — check the files in $d"; fi
+  if (( n < 40 )); then warn "fewer rules than expected - check the files in $d"; fi
 }
 
 sec_perms() {
@@ -693,6 +695,43 @@ EOF
 #   PTB (DE)    https://www.ptb.de -> Time synchronization ... NTP (ptbtime4: other site)
 # NTS-KE tcp 4460, then NTP (Netnod: udp 4123): both via the tunnel (hostfw out_new).
 # DNS only via the tunnel (netprivacy): no time sync without Mullvad, the RTC keeps time.
+## Not CIS. Mullvad management socket (/var/run/mullvad-vpn): any local user can
+## connect, disconnect and change settings by default. MULLVAD_MANAGEMENT_SOCKET_GROUP
+## limits it to one group (mullvadvpn-app README, environment variables).
+sec_mullvad() {
+  local dropin=/etc/systemd/system/mullvad-daemon.service.d/50-socket-group.conf
+  local line="Environment=\"MULLVAD_MANAGEMENT_SOCKET_GROUP=${MULLVAD_SOCKET_GROUP}\""
+  if [[ -z $MULLVAD_SOCKET_GROUP ]]; then
+    log "MULLVAD_SOCKET_GROUP empty: any local user may use the Mullvad daemon"; return 0
+  fi
+  if ! unit_exists mullvad-daemon.service; then
+    warn "mullvad-daemon.service not found - skipped"; return 0
+  fi
+  groupadd -r -f "$MULLVAD_SOCKET_GROUP"
+  if [[ -z $TARGET_USER ]]; then
+    warn "no TARGET_USER: add your user yourself: usermod -aG $MULLVAD_SOCKET_GROUP <user>"
+  elif id -nG "$TARGET_USER" | tr ' ' '\n' | grep -qxF "$MULLVAD_SOCKET_GROUP"; then
+    log "$TARGET_USER already in $MULLVAD_SOCKET_GROUP"
+  else
+    usermod -aG "$MULLVAD_SOCKET_GROUP" "$TARGET_USER"
+    log "$TARGET_USER added to $MULLVAD_SOCKET_GROUP (log out and in, then mullvad works again)"
+  fi
+  if [[ -f $dropin ]] && grep -qxF "$line" "$dropin"; then
+    log "$dropin already set"; return 0
+  fi
+  write_file "$dropin" 0644 <<EOF
+## harden-workstation.sh mullvad: only group ${MULLVAD_SOCKET_GROUP} may use the
+## management socket (mullvad CLI / GUI). Default without it: any local user.
+[Service]
+${line}
+EOF
+  systemctl daemon-reload
+  # package unit: RestartKillSignal=SIGUSR1 = the daemon blocks all traffic before it
+  # stops; auto-connect reconnects after the start
+  if systemctl restart mullvad-daemon.service; then log "mullvad-daemon restarted"
+  else warn "mullvad-daemon restart failed: systemctl status mullvad-daemon"; fi
+}
+
 sec_time() {
   write_file /etc/chrony.conf 0644 <<'EOF'
 # harden-workstation.sh time: NTS only, no pool, no servers from DHCP
@@ -756,7 +795,7 @@ main() {
   local -a list
   if [[ $# -eq 0 || ${1:-} == --list || ${1:-} == -h ]]; then usage; exit 0; fi
   [[ $EUID -eq 0 ]] || die "run with sudo"
-  if [[ -z $TARGET_USER ]]; then warn "SUDO_USER is empty — user-specific steps will be skipped"; fi
+  if [[ -z $TARGET_USER ]]; then warn "SUDO_USER is empty - user-specific steps will be skipped"; fi
 
   list=("$@")
   if [[ ${list[0]} == all ]]; then list=("${SECTIONS[@]}"); fi
@@ -781,6 +820,7 @@ main() {
       perms)       sec_perms ;;
       mic)         sec_mic ;;
       netprivacy)  sec_netprivacy ;;
+      mullvad)     sec_mullvad ;;
       time)        sec_time ;;
       kargs)       sec_kargs ;;
       *)           warn "unknown section: $s" ;;

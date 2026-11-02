@@ -34,6 +34,9 @@ https://mullvad.net/help/install-mullvad-app-linux
     mullvad connect
     mullvad status -v
 
+Management socket for group `mullvad` only: `sudo ./harden-workstation.sh mullvad`,
+then log out and in.
+
 API access only Direct: the one method hostfw allows outside the tunnel
 (docs/deviations.md).
 
@@ -86,6 +89,8 @@ Not used: split tunneling, custom DNS, DNS content blockers, Allow LAN.
     sudo hostfw status                     # wg_fwmark 0x6d6f6c65
     mullvad api-access list                # only "1. Direct *" has the star
     mullvad api-access get                 # Direct
+    ls -l /var/run/mullvad-vpn             # group mullvad, nothing for others
+    sudo -u nobody mullvad status          # refused
 
 ## Proton VPN removed (2026-10-26)
 
