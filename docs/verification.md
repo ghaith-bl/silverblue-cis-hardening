@@ -57,7 +57,7 @@ Tests run after hardening + reboot. All passed.
 | AF_ALG off (kernel arg) | `grep -o 'initcall_blacklist=[^ ]*' /proc/cmdline` | `initcall_blacklist=af_alg_init` |
 | AF_ALG socket fails | `python3 -I -c 'import socket; socket.socket(socket.AF_ALG, socket.SOCK_SEQPACKET)'` | `OSError: [Errno 97] Address family not supported by protocol` |
 | hardening kargs | `grep -oE 'page_alloc.shuffle=[^ ]*\|rd.shell=[^ ]*\|rd.emergency=[^ ]*' /proc/cmdline` | `page_alloc.shuffle=1`, `rd.shell=0`, `rd.emergency=halt` |
-| page allocator shuffle | `cat /sys/module/page_alloc/parameters/shuffle` | `Y` |
+| page allocator shuffle | `sudo cat /sys/module/page_alloc/parameters/shuffle` (root only, 0400) | `Y` |
 | GRUB password | `sudo test -f /boot/grub2/user.cfg && echo set`; menu: `e` on an entry | `set`; asks user `root` + password; plain boot asks nothing |
 | AF_ALG tries since boot | `sudo ausearch -k af-alg -sc socket -ts boot -i \| grep -o 'exe=[^ ]*' \| sort \| uniq -c` | only the test above (python3) |
 | unowned / world-writable | `sudo find / -xdev \( -nouser -o -nogroup \)` etc. | none |

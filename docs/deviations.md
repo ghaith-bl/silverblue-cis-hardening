@@ -100,6 +100,9 @@ Input for an OpenSCAP tailoring file.
   away. Normal boot and older entries ask nothing; edit (`e`), command line (`c`) and
   the firmware entry ask. Cost: no shell to debug a broken boot; fix = previous GRUB
   entry (`rpm-ostree rollback`) or `e` + password, remove the args for one boot.
+  Host 2026-11-02: args in /proc/cmdline, shuffle `Y`, GRUB password asked on `e` only.
+  The halt path itself not tested (a wrong LUKS password only waits, as before: no shell
+  on that path anyway). Test idea: `e`, break the `ostree=` path, unlock -> must halt.
 - Source of the kargs ideas: secureblue default kargs (compared 2026-10-30), minus what
   the Fedora kernel config already does. Not taken: `ia32_emulation=0` (Steam),
   `nosmt` (half the cores), `vsyscall=none` (kernel already xonly), `module.sig_enforce`

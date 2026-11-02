@@ -7,6 +7,14 @@ and Mullvad VPN (official app, WireGuard, lockdown mode).
 Goal: apply as much of CIS L2 as possible **without breaking** the tools I use every day,
 and document every deviation with a reason.
 
+> **This is my own laptop's config, not a product.** Tested only on the machine below.
+> Read the script and the Decisions block before you run anything: some sections lock
+> you out if they do not fit your setup (PAM, su, sudo, kernel args). No warranty
+> (GPL-3.0, sections 15-16).
+
+Watched live by [sectop](https://github.com/ghaith-bl/sectop): a terminal dashboard
+whose default posture checks and watch list are this repo's baseline.
+
 ## Result (OpenSCAP, profile `cis_workstation_l2`)
 
 | Result         | Before | After |
@@ -149,7 +157,28 @@ sudo ostree admin config-diff                    # every /etc change vs. image d
 - [docs/mullvad.md](docs/mullvad.md) - Mullvad VPN setup, Proton VPN removed
 - [browsers/README.md](browsers/README.md) — Brave + Firefox hardening
 
+## Requirements
+
+- Fedora Silverblue / Atomic desktop (rpm-ostree). Plain Fedora: most sections work, the
+  `kargs` section only warns (no rpm-ostree), check every path first
+- bash, sudo, systemd, auditd, firewalld, NetworkManager, chrony, SELinux enforcing
+- hostfw (firewall/): nftables + Mullvad VPN app (WireGuard, lockdown mode)
+- OpenSCAP + scap-security-guide only to measure (`oscap`, profile `cis_workstation_l2`)
+
+## Checks (CI)
+
+Every push (.github/workflows/check.yml): `bash -n`, ShellCheck (errors), private-info
+check of the working tree (tools/check-private-info.sh --tree).
+History: reviewed by hand 2026-11-01 (full run): public VPN / DNS addresses, LAN and
+libvirt addresses, interface names, Mullvad's public signing key uid. Kept on purpose.
+
 ## Credits
 
-Research, script drafting and documentation done with help from Claude.
-Every change was reviewed, run and verified on my own machine.
+- CIS Fedora Linux Benchmark, OpenSCAP / scap-security-guide (profile and scans)
+- Kernel args ideas: secureblue (default kargs), Kernel Self Protection Project
+- Research, script drafting and documentation done with help from Claude.
+  Every change was reviewed, run and verified on my own machine.
+
+## License
+
+GPL-3.0-or-later, see [LICENSE](LICENSE).

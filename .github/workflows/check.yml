@@ -1,0 +1,33 @@
+name: check
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: bash syntax
+        run: |
+          for f in harden-workstation.sh tools/*.sh firewall/*.sh browsers/*.sh; do
+            bash -n "$f"
+          done
+          sh -n firewall/nm-dispatcher/90-hostfw-sync
+
+      - name: shellcheck (errors)
+        run: |
+          shellcheck --version | head -2
+          shellcheck -S error harden-workstation.sh tools/*.sh firewall/*.sh browsers/*.sh \
+            firewall/nm-dispatcher/90-hostfw-sync
+
+      - name: private info (working tree)
+        run: tools/check-private-info.sh --tree
