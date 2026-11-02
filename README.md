@@ -167,7 +167,7 @@ sudo ostree admin config-diff                    # every /etc change vs. image d
 
 ## Checks (CI)
 
-Every push (.github/workflows/check.yml): `bash -n`, ShellCheck (errors), private-info
+Every push (.github/workflows/check.yml): `bash -n`, ShellCheck (warnings), private-info
 check of the working tree (tools/check-private-info.sh --tree).
 History: reviewed by hand 2026-11-01 (full run): public VPN / DNS addresses, LAN and
 libvirt addresses, interface names, Mullvad's public signing key uid. Kept on purpose.

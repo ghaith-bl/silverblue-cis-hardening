@@ -23,10 +23,10 @@ jobs:
           done
           sh -n firewall/nm-dispatcher/90-hostfw-sync
 
-      - name: shellcheck (errors)
+      - name: shellcheck (warnings)
         run: |
           shellcheck --version | head -2
-          shellcheck -S error harden-workstation.sh tools/*.sh firewall/*.sh browsers/*.sh \
+          shellcheck -S warning harden-workstation.sh tools/*.sh firewall/*.sh browsers/*.sh \
             firewall/nm-dispatcher/90-hostfw-sync
 
       - name: private info (working tree)
