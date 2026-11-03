@@ -34,6 +34,7 @@ rate limit   10/min burst 20 per rule (noise: 6/min burst 10) -> counters are ex
 | `router4` | `hostfw sync` / NM dispatcher | IPv4 default gateways, not the tunnel |
 | `router_admin4` | `hostfw router-open [MIN]` | gw . 80, gw . 443 with timeout |
 | `lan_allow4` | edit `hostfw.nft` | static `ip . proto . port` exceptions |
+| `noscope_cg` | hostfw-noscope.service (every 5 s, on a change) | GNOME Shell's cgroup ids (`socket cgroupv2 level 5`) |
 
 ## output
 
@@ -41,22 +42,23 @@ rate limit   10/min burst 20 per rule (noise: 6/min burst 10) -> counters are ex
 |---|---|---|---|---|
 | 1 | out_est | ct established,related | accept | - |
 | 2 | out_lo | oif lo | accept | - |
-| 3 | out_dns_vpn | tcp/udp 53,853 -> vpn_dns4 via wg0-mullvad | accept, counted | - |
-| 4 | out_dns_vm | tcp/udp 53,853 via virbr0 | accept | - |
-| 5 | out_dns | any other tcp/udp 53,853 | deny | HFW-OUT-DNS |
-| 6 | out_disco | udp 137,138,1900,3702,5351,5353,5355,27036 / tcp 5355,5357,5358,27036,27037 | deny | HFW-OUT-DISCO |
-| 7 | out_share | tcp 21,111,139,445,548,2049 / udp 69,111,2049, not via virbr0 | deny | HFW-OUT-SHARE |
-| 8 | out_new | oif in if_vpn, ct new | accept + log | HFW-OUT-NEW |
-| 9 | out_trusted | oif in if_trusted | accept | - |
-| 10 | out_wg | meta mark in wg_fwmark, ct mark not 0xf41 | accept, counted | - |
-| 11 | out_vpn_api | uid 0 tcp 443 -> vpn_api4 | accept, counted | - |
-| 12 | out_dhcp4 | udp 68 -> 67 | accept | - |
-| 13 | out_router_icmp | icmp echo-request -> router4 | accept | - |
-| 14 | out_router_admin | ip . tcp port in router_admin4 | accept + log | HFW-OUT-ROUTER-ADMIN |
-| 15 | out_lan_allow | ip . proto . port in lan_allow4 | accept + log | HFW-OUT-LAN-ALLOW |
-| 16 | out_ndp6 | icmpv6 RS, NS, NA, MLDv2 report | accept | - |
-| 17 | out_lan | daddr private / link-local / CGNAT / multicast / broadcast | deny | HFW-OUT-LAN |
-| 18 | out_leak | anything else on uplink | deny | HFW-OUT-LEAK |
+| 3 | out_noscope | GNOME Shell cgroup (set noscope_cg), not established | count + log, own switch `enforce_noscope` | HFW-OUT-NOSCOPE |
+| 4 | out_dns_vpn | tcp/udp 53,853 -> vpn_dns4 via wg0-mullvad | accept, counted | - |
+| 5 | out_dns_vm | tcp/udp 53,853 via virbr0 | accept | - |
+| 6 | out_dns | any other tcp/udp 53,853 | deny | HFW-OUT-DNS |
+| 7 | out_disco | udp 137,138,1900,3702,5351,5353,5355,27036 / tcp 5355,5357,5358,27036,27037 | deny | HFW-OUT-DISCO |
+| 8 | out_share | tcp 21,111,139,445,548,2049 / udp 69,111,2049, not via virbr0 | deny | HFW-OUT-SHARE |
+| 9 | out_new | oif in if_vpn, ct new | accept + log | HFW-OUT-NEW |
+| 10 | out_trusted | oif in if_trusted | accept | - |
+| 11 | out_wg | meta mark in wg_fwmark, ct mark not 0xf41 | accept, counted | - |
+| 12 | out_vpn_api | uid 0 tcp 443 -> vpn_api4 | accept, counted | - |
+| 13 | out_dhcp4 | udp 68 -> 67 | accept | - |
+| 14 | out_router_icmp | icmp echo-request -> router4 | accept | - |
+| 15 | out_router_admin | ip . tcp port in router_admin4 | accept + log | HFW-OUT-ROUTER-ADMIN |
+| 16 | out_lan_allow | ip . proto . port in lan_allow4 | accept + log | HFW-OUT-LAN-ALLOW |
+| 17 | out_ndp6 | icmpv6 RS, NS, NA, MLDv2 report | accept | - |
+| 18 | out_lan | daddr private / link-local / CGNAT / multicast / broadcast | deny | HFW-OUT-LAN |
+| 19 | out_leak | anything else on uplink | deny | HFW-OUT-LEAK |
 
 `out_wg`: the Mullvad daemon sets mark 0x6d6f6c65 on the relay transport (setting a
 mark needs CAP_NET_ADMIN). Its API calls outside the tunnel have no mark: `out_vpn_api`
@@ -98,6 +100,23 @@ out_lan / out_leak (not used on this host; test 2026-11-01: observe-log.md).
 `deny` = count + log + `jump enforce`:
 - observe: `enforce` empty -> accepted, logged only
 - enforce: `reject with icmpx admin-prohibited` -> app fails fast, no hang
+
+`out_noscope` (2026-11-03): GNOME Shell's own unit (`org.gnome.Shell@<x>.service`) is no
+app. An app GNOME starts lands there when its launcher forks before GNOME moves it into
+its scope (Brave rpm; fix: appunit section). Its flows have no program name anywhere.
+- `jump deny_out_noscope` (not goto): count + log + `jump enforce_noscope`; observe
+  returns and the rest of output decides as for any flow
+- own switch: `hostfw noscope observe | enforce`, boot mode `/etc/hostfw/noscope`
+  (default observe). The global `enforce` does not touch it
+- set `noscope_cg`: nft resolves a path to the cgroup id when the element is added, a
+  new login = new id. hostfw-noscope.service (root, CAP_NET_ADMIN only) looks every 5 s
+  (paths + inode, files only) and rewrites the set in one transaction on a change.
+  Gap: up to 5 s after a login. A stale id matches nothing (fails open, never wrong)
+- not a guard against malware running as my user: a process can move itself to another
+  cgroup of mine. It closes the "app hides in GNOME Shell's cgroup" hole
+- netfilter: "The cgroupv2 support for nftables was designed to be used with maps"
+  (Pablo Neira Ayuso, netfilter-devel 2022-03, "Support for loading firewall rules with
+  cgroup(v2) expressions early")
 
 ## Never-leave ports
 

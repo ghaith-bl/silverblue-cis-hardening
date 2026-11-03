@@ -38,6 +38,8 @@ hostfw.sh                     apply | observe | enforce | confirm | sync | api-u
                               router-open | status | counters | report | remove | install
                               uninstall
 hostfw.service                boot unit (own unit - not nftables.service)
+hostfw-noscope.py             watcher: GNOME Shell's cgroup id -> set noscope_cg (out_noscope)
+hostfw-noscope.service        its unit (root, CAP_NET_ADMIN only, every 5 s)
 nm-dispatcher/90-hostfw-sync  re-sync router4 (+ wg_fwmark while the tunnel is up) on network up
 hostfw.local.example         template for /etc/hostfw/local.conf (this machine's addresses)
 firewalld-cleanup.sh          drop-zone legacy rich rules (runtime, then --permanent)
@@ -50,6 +52,9 @@ Installed paths:
 /usr/local/sbin/hostfw
 /etc/hostfw/hostfw.nft
 /etc/hostfw/mode                                   observe | enforce
+/etc/hostfw/noscope                                observe | enforce (out_noscope only)
+/usr/local/sbin/hostfw-noscope
+/etc/systemd/system/hostfw-noscope.service         WantedBy=hostfw.service
 /etc/hostfw/local.conf                             vpn_dns4, vpn_api4 (root 0600, never in git)
 /etc/systemd/system/hostfw.service
 /etc/NetworkManager/dispatcher.d/90-hostfw-sync
@@ -61,6 +66,8 @@ Installed paths:
 - enforce: denied traffic rejected (`icmpx admin-prohibited`, apps fail fast)
 - new flows via tunnel (`HFW-OUT-NEW`, `HFW-FWD-VM-NEW`): allowed, logged (audit, sectop)
 - switch = flush/add one rule in chain `enforce`. live, atomic, no reload
+- out_noscope (flows from GNOME Shell's cgroup): own switch, chain `enforce_noscope`,
+  `hostfw noscope observe | enforce | status` (docs/rules.md)
 
 ## Workflow
 
@@ -123,6 +130,10 @@ Watch for:
 - `HFW-OUT-DISCO` brave / steam -> expected, keep blocked
 - `HFW-IN-LAN` -> who on the LAN tries to reach me
 - `HFW-OUT-NEW` -> every new flow via tunnel (allowed): who talks to what. Not in report top flows
+- `HFW-OUT-NOSCOPE` -> a process in GNOME Shell's cgroup opened a flow (an app without its
+  own scope, or GNOME Shell itself: weather, extensions). sectop names it
+  (org.gnome.Shell/<comm>). Before `hostfw noscope enforce`: none for the observe days,
+  or each one explained
 
 Decide exceptions from data, not guesses.
 
@@ -213,6 +224,8 @@ Setup, settings and how it fits hostfw: [../docs/mullvad.md](../docs/mullvad.md)
 - dispatcher runs nft from the NM dispatcher SELinux domain -> after first reconnect:
   `sudo ausearch -m avc -ts recent | grep -i hostfw`
 - split tunneling (`mullvad-exclude`) is blocked by hostfw on purpose (out_leak)
+- out_noscope: up to 5 s after a login the new GNOME Shell cgroup is not in the set yet;
+  table reload empties the set until the watcher's next look (it is restarted)
 - L2 (ARP) not covered by `inet` table
 - new libvirt network / rootful containers -> add the bridge to `if_vm` + `if_trusted`
 - `lan_allow4` needs static IPs (router DHCP reservation)
@@ -223,6 +236,8 @@ Setup, settings and how it fits hostfw: [../docs/mullvad.md](../docs/mullvad.md)
 - nftables wiki - hooks, priorities, multiple base chains: https://wiki.nftables.org/wiki-nftables/index.php/Netfilter_hooks
 - nftables wiki - sets, counters, logging, reject: https://wiki.nftables.org/
 - nft(8): https://www.netfilter.org/projects/nftables/manpage.html
+- cgroupv2 match, ids resolved at load, refresh on updates, use with maps (netfilter-devel,
+  2022-03): https://lore.kernel.org/all/YkDXwaPwYf8NgKT+@salvia/T/
 - firewalld zones / policies / reload: https://firewalld.org/documentation/
 - NetworkManager-dispatcher(8): https://networkmanager.dev/docs/api/latest/NetworkManager-dispatcher.html
 - systemd-run(1), systemd.unit(5)

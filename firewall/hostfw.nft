@@ -13,6 +13,8 @@
 #
 # Mode: chain `enforce` empty = observe (log only), one reject rule = enforce.
 # Switched live by hostfw.sh. No reload.
+# noscope (GNOME Shell's shared cgroup) has its own switch, chain `enforce_noscope`:
+# `hostfw noscope observe | enforce`.
 #
 # Naming contract (sectop):
 #   log prefix  HFW-<DIR>-<NAME>:     DIR = OUT | IN | FWD
@@ -89,6 +91,15 @@ table inet hostfw {
 			     255.255.255.255 }
 	}
 
+	# GNOME Shell's own unit, user.slice/user-<uid>.slice/user@<uid>.service/<slice>/
+	# org.gnome.Shell@<x>.service (level 5). nft resolves a path to the cgroup id when
+	# the element is added: a new login = new id. Filled by hostfw-noscope.service
+	# (watches every 5 s, rewrites the set on a change).
+	set noscope_cg {
+		typeof socket cgroupv2 level 5
+		comment "GNOME Shell's cgroup (apps without their own scope land there); filled by: hostfw-noscope"
+	}
+
 	set lan6 {
 		type ipv6_addr
 		flags interval
@@ -115,11 +126,16 @@ table inet hostfw {
 	counter in_noise         { comment "LAN broadcast / multicast to host" }
 	counter in_lan           { comment "new inbound from uplink (firewalld drops)" }
 	counter in_vpn           { comment "new inbound from tunnel (firewalld drops)" }
+	counter out_noscope      { comment "new host flows from GNOME Shell's cgroup (app without its own scope)" }
 
 	# ---------- mode switch ----------
 
 	chain enforce {
 		comment "empty = observe, single reject rule = enforce"
+	}
+
+	chain enforce_noscope {
+		comment "own switch for out_noscope: empty = observe, single reject rule = enforce"
 	}
 
 	# ---------- deny: count + log + mode ----------
@@ -171,6 +187,14 @@ table inet hostfw {
 		limit rate 10/minute burst 20 packets log prefix "HFW-FWD-IN: " level info
 		jump enforce
 		accept
+	}
+
+	# jumped to, not goto: observe returns, and the rest of output decides as for any
+	# other flow (accept here would skip the leak rules of this table)
+	chain deny_out_noscope {
+		counter name "out_noscope"
+		limit rate 10/minute burst 20 packets log prefix "HFW-OUT-NOSCOPE: " level info flags skuid
+		jump enforce_noscope
 	}
 
 	# ---------- allow + log (rare, worth seeing) ----------
@@ -231,6 +255,9 @@ table inet hostfw {
 
 		ct state established,related accept comment "out_est"
 		oifname "lo" accept comment "out_lo"
+
+		# new flows from GNOME Shell's cgroup: count + log, reject in its own enforce mode
+		socket cgroupv2 level 5 @noscope_cg jump deny_out_noscope comment "out_noscope"
 
 		# never leave (any interface)
 		meta l4proto { tcp, udp } th dport { 53, 853 } oifname @if_vpn ip daddr @vpn_dns4 counter name "out_dns_vpn" accept comment "out_dns_vpn"

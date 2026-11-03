@@ -141,6 +141,7 @@ sudo systemctl daemon-reload && sudo systemctl restart mullvad-daemon
 sudo systemctl disable --now usbguard               # USB protection off
 sudo usbguard append-rule 'allow id <vid>:<pid> ...'   # one device for good (sudo usbguard list-devices)
 sudo rm /usr/local/share/applications/brave-browser.desktop /usr/local/bin/app-unit   # appunit off
+sudo hostfw noscope observe                      # out_noscope: log only again
 sudo cp /var/backups/hardening/<time>/etc/chrony.conf /etc/ && sudo systemctl restart chronyd
 sudo rpm-ostree kargs --delete=initcall_blacklist=af_alg_init   # then reboot
 sudo rpm-ostree kargs --delete=page_alloc.shuffle=1 --delete=rd.shell=0 --delete=rd.emergency=halt
@@ -180,8 +181,17 @@ sudo ostree admin config-diff                    # every /etc change vs. image d
 
 ## Checks (CI)
 
-Every push (.github/workflows/check.yml): `bash -n`, ShellCheck (warnings), private-info
-check of the working tree (tools/check-private-info.sh --tree).
+Every push (.github/workflows/check.yml): `bash -n`, ShellCheck (warnings), Python syntax
+(firewall/hostfw-noscope.py), private-info check of the working tree
+(tools/check-private-info.sh --tree).
+
+## Kernel arg trials
+
+`tools/kargs-bench.sh before`, then the args (`sudo rpm-ostree kargs --append=...`) and a
+reboot, then `tools/kargs-bench.sh after`: the same numbers both times (memory free,
+small files, O_DIRECT disk read, podman start, optional VM boot to ssh, kernel warnings,
+IOMMU faults) in `~/kargs-bench/`. A trial arg goes into `KERNEL_ARGS` only after it is
+kept.
 History: reviewed by hand 2026-11-01 (full run): public VPN / DNS addresses, LAN and
 libvirt addresses, interface names, Mullvad's public signing key uid. Kept on purpose.
 

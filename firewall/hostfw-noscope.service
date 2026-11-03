@@ -1,0 +1,47 @@
+# hostfw-noscope: keeps set noscope_cg of table inet hostfw on GNOME Shell's cgroup
+# (rule out_noscope). Root, CAP_NET_ADMIN only (nft), no network. Looks every 5 s,
+# runs nft only when a login / logout changed the cgroup.
+[Unit]
+Description=hostfw noscope - GNOME Shell's cgroup id -> set noscope_cg
+Documentation=file:///usr/local/sbin/hostfw
+After=hostfw.service
+PartOf=hostfw.service
+Requisite=hostfw.service
+
+[Service]
+Type=exec
+ExecStart=/usr/bin/python3 -I -B /usr/local/sbin/hostfw-noscope
+Restart=on-failure
+RestartSec=5s
+RuntimeDirectory=hostfw-noscope
+RuntimeDirectoryMode=0755
+
+CapabilityBoundingSet=CAP_NET_ADMIN
+AmbientCapabilities=
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+IPAddressDeny=any
+MemoryMax=64M
+TasksMax=8
+
+[Install]
+WantedBy=hostfw.service

@@ -11,6 +11,12 @@ MODE_FILE=$ETC_DIR/mode
 SBIN=/usr/local/sbin/hostfw
 UNIT_DST=/etc/systemd/system/hostfw.service
 DISPATCHER_DST=/etc/NetworkManager/dispatcher.d/90-hostfw-sync
+# noscope: GNOME Shell's cgroup (rule out_noscope), own mode, own watcher
+NOSCOPE_FILE=$ETC_DIR/noscope
+NOSCOPE_BIN=/usr/local/sbin/hostfw-noscope
+NOSCOPE_UNIT=hostfw-noscope.service
+NOSCOPE_UNIT_DST=/etc/systemd/system/$NOSCOPE_UNIT
+NOSCOPE_STATE=/run/hostfw-noscope/state
 ROLLBACK=hostfw-rollback
 RUN_DIR=/run/hostfw
 DEADLINE_FILE=$RUN_DIR/rollback
@@ -47,6 +53,25 @@ live_mode() {
     else
         echo observe
     fi
+}
+
+noscope_live() {   # observe | enforce | missing (table without chain enforce_noscope) | off
+    table_loaded || { echo off; return; }
+    local rules
+    rules=$("$NFT" list chain $T enforce_noscope 2>/dev/null) || { echo missing; return; }
+    if grep -qE '^[[:space:]]+reject' <<< "$rules"; then echo enforce; else echo observe; fi
+}
+
+noscope_set_mode() {   # $1 = observe | enforce (live only)
+    "$NFT" flush chain $T enforce_noscope
+    if [[ $1 == enforce ]]; then
+        "$NFT" add rule $T enforce_noscope reject with icmpx admin-prohibited
+    fi
+}
+
+# table (re)loaded = set noscope_cg empty: the watcher fills it again on its first look
+noscope_refill() {
+    systemctl --no-block try-restart "$NOSCOPE_UNIT" >/dev/null 2>&1 || true
 }
 
 # parse "--rollback N" / "--no-rollback"; sets ROLLBACK_MIN
@@ -215,7 +240,8 @@ cmd_apply() {
         die "fix $LOCAL_FILE first (template: firewall/hostfw.local.example)"
     "$NFT" -c -f "$rs" || die "syntax check failed: $rs"
     "$NFT" -f "$rs"
-    log "loaded $rs (runtime only, mode: observe)"
+    log "loaded $rs (runtime only, mode: observe, noscope: observe)"
+    noscope_refill
     cmd_sync
     if (( ROLLBACK_MIN > 0 )); then
         rollback_arm "$ROLLBACK_MIN" "$NFT" delete table $T
@@ -232,7 +258,12 @@ cmd_boot() {   # used by hostfw.service
     if [[ $mode == enforce ]]; then
         "$NFT" add rule $T enforce reject with icmpx admin-prohibited
     fi
-    log "boot: mode $mode"
+    local noscope=observe
+    [[ -r $NOSCOPE_FILE ]] && noscope=$(tr -d '[:space:]' < "$NOSCOPE_FILE")
+    [[ $noscope == enforce ]] || noscope=observe
+    noscope_set_mode "$noscope"
+    log "boot: mode $mode, noscope $noscope"
+    noscope_refill
     cmd_sync || true
 }
 
@@ -358,6 +389,45 @@ cmd_api_update() {   # vpn_api4 <- the address inet mullvad allows; asks first
     cmd_sync
 }
 
+cmd_noscope() {   # observe | enforce | sync | status
+    local sub=${1:-status}
+    case $sub in
+        observe|enforce)
+            need_root; need_table
+            [[ $(noscope_live) != missing ]] ||
+                die "chain enforce_noscope missing: old ruleset loaded (install, then systemctl reload hostfw)"
+            noscope_set_mode "$sub"
+            if [[ -d $ETC_DIR ]]; then
+                echo "$sub" > "$NOSCOPE_FILE"
+                log "noscope: $sub (saved for boot: $NOSCOPE_FILE)"
+            else
+                log "noscope: $sub (runtime only, not installed)"
+            fi ;;
+        sync)
+            need_root; need_table
+            [[ -x $NOSCOPE_BIN ]] || die "$NOSCOPE_BIN missing (run: hostfw install)"
+            /usr/bin/python3 -I -B "$NOSCOPE_BIN" --once ;;
+        status)
+            need_root
+            local n
+            echo "noscope mode:  $(noscope_live)  boot: $(cat "$NOSCOPE_FILE" 2>/dev/null || echo -)"
+            echo "watcher:       $(systemctl is-active "$NOSCOPE_UNIT" 2>/dev/null || true)"
+            if [[ -s $NOSCOPE_STATE ]]; then
+                echo "cgroups:       (id path, from $NOSCOPE_STATE)"
+                sed 's/^/  /' "$NOSCOPE_STATE"
+            else
+                echo "cgroups:       none (no GNOME Shell session, or watcher not running)"
+            fi
+            table_loaded &&
+                echo "counter:       $("$NFT" list counter $T out_noscope 2>/dev/null |
+                                       grep -oE 'packets [0-9]+ bytes [0-9]+' || echo missing)  (since table load)"
+            n=$(journalctl _TRANSPORT=kernel -b --no-pager -o cat -g '^HFW-OUT-NOSCOPE:' 2>/dev/null |
+                grep -c . || true)
+            echo "log lines:     $n this boot (rate-limited; all boots: hostfw report)" ;;
+        *)  die "noscope: observe | enforce | sync | status" ;;
+    esac
+}
+
 cmd_router_open() {
     need_root; need_table
     local min=${1:-10} gw n=0
@@ -376,6 +446,7 @@ cmd_status() {
     local mode; mode=$(live_mode)
     echo "mode:          $mode"
     [[ $mode == off ]] && return 0
+    echo "noscope:       $(noscope_live)  (hostfw noscope status)"
     if rollback_pending; then
         echo "rollback:      ARMED, $(rollback_left)"
     else
@@ -447,7 +518,8 @@ cmd_remove() {
 cmd_install() {
     need_root
     local f
-    for f in hostfw.nft hostfw.service nm-dispatcher/90-hostfw-sync; do
+    for f in hostfw.nft hostfw.service nm-dispatcher/90-hostfw-sync hostfw-noscope.py \
+             hostfw-noscope.service; do
         [[ -f $SELF_DIR/$f ]] || die "missing $SELF_DIR/$f (run install from the repo folder)"
     done
     install -d -m 0755 "$ETC_DIR"
@@ -456,22 +528,30 @@ cmd_install() {
         local mode; mode=$(live_mode); [[ $mode == off ]] && mode=observe
         echo "$mode" > "$MODE_FILE"
     fi
+    [[ -f $NOSCOPE_FILE ]] || echo observe > "$NOSCOPE_FILE"
     install -m 0755 "$SELF" "$SBIN"
+    install -m 0755 "$SELF_DIR/hostfw-noscope.py" "$NOSCOPE_BIN"
     install -m 0644 "$SELF_DIR/hostfw.service" "$UNIT_DST"
+    install -m 0644 "$SELF_DIR/hostfw-noscope.service" "$NOSCOPE_UNIT_DST"
     install -m 0755 "$SELF_DIR/nm-dispatcher/90-hostfw-sync" "$DISPATCHER_DST"
-    command -v restorecon >/dev/null && restorecon -RF "$ETC_DIR" "$SBIN" "$UNIT_DST" "$DISPATCHER_DST"
+    command -v restorecon >/dev/null &&
+        restorecon -RF "$ETC_DIR" "$SBIN" "$NOSCOPE_BIN" "$UNIT_DST" "$NOSCOPE_UNIT_DST" "$DISPATCHER_DST"
     systemctl daemon-reload
     systemctl enable hostfw.service
+    systemctl enable "$NOSCOPE_UNIT"
     [[ -f $LOCAL_FILE ]] ||
         log "WARNING: $LOCAL_FILE missing - create it from firewall/hostfw.local.example before reboot"
-    log "installed. boot mode: $(cat "$MODE_FILE")"
-    log "table already loaded? keep it. else: sudo systemctl start hostfw.service"
+    log "installed. boot mode: $(cat "$MODE_FILE"), noscope: $(cat "$NOSCOPE_FILE")"
+    log "table already loaded? new ruleset: sudo systemctl reload hostfw.service (counters reset)"
+    log "  then: sudo systemctl start $NOSCOPE_UNIT"
+    log "not loaded: sudo systemctl start hostfw.service"
 }
 
 cmd_uninstall() {
     need_root
+    systemctl disable --now "$NOSCOPE_UNIT" >/dev/null 2>&1 || true
     systemctl disable hostfw.service >/dev/null 2>&1 || true
-    rm -f "$UNIT_DST" "$SBIN" "$DISPATCHER_DST"
+    rm -f "$UNIT_DST" "$SBIN" "$DISPATCHER_DST" "$NOSCOPE_BIN" "$NOSCOPE_UNIT_DST"
     systemctl daemon-reload
     log "uninstalled (unit, script, dispatcher). kept: $ETC_DIR (mode, local.conf)"
     log "runtime table untouched - remove with: hostfw.sh remove"
@@ -493,6 +573,9 @@ hostfw - host egress filter (nftables table inet hostfw)
   api-update                 vpn_api4 in /etc/hostfw/local.conf <- the API address
                              inet mullvad allows (Mullvad not connected), asks y/N, sync
   router-open [MIN]          allow router web UI tcp 80,443 for MIN (default 10) minutes
+  noscope observe|enforce    new flows from GNOME Shell's cgroup (out_noscope): log only /
+                             reject; own switch, saved for boot (/etc/hostfw/noscope)
+  noscope sync | status      fill set noscope_cg once / mode, watcher, cgroups, counter
   status                     mode, rollback, sets, counters
   counters [--json]          per-rule counters (exact)
   report [SINCE] [TOP]       summarize logs, default "7 days ago" 40
@@ -515,6 +598,7 @@ main() {
         sync)         cmd_sync ;;
         api-update)   cmd_api_update ;;
         router-open)  cmd_router_open "$@" ;;
+        noscope)      cmd_noscope "$@" ;;
         status)       cmd_status ;;
         counters)     cmd_counters "$@" ;;
         report)       cmd_report "$@" ;;

@@ -23,6 +23,9 @@ jobs:
           done
           sh -n firewall/nm-dispatcher/90-hostfw-sync
 
+      - name: python syntax
+        run: python3 -I -m py_compile firewall/hostfw-noscope.py
+
       - name: shellcheck (warnings)
         run: |
           shellcheck --version | head -2
