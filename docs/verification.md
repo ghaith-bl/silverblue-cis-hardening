@@ -70,4 +70,5 @@ Tests run after hardening + reboot. All passed.
 | new device blocked | plug a flash drive; `sudo usbguard list-devices --blocked` | listed as `block`, not in Files |
 | flash drive allowed | `sudo usb-allow-storage`, answer `y` | `storage only`, allowed, shows in Files |
 | allow until unplugged | unplug, plug again; `sudo usb-allow-storage`, answer `n` | new id, still blocked |
+| Brave in its own unit | open Brave from the menu; `for p in $(pgrep -x brave); do cat /proc/$p/cgroup; done \| sort \| uniq -c` | `app-brave\x2dbrowser@<pid>.service` (main process: `app-org.chromium.Chromium-<pid>.scope`, Chromium moves itself); none in `org.gnome.Shell@user.service` |
 | GNOME usb-protection off | `gsettings get org.gnome.desktop.privacy usb-protection; gsettings writable org.gnome.desktop.privacy usb-protection` | `false`, `false` |

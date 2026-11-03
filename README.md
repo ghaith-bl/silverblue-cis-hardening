@@ -73,6 +73,7 @@ sudo ./harden-workstation.sh all
 | `GENERIC_HOSTNAME`     | `localhost`| hostname a new network may see on its first connect; `""` = keep mine |
 | `MULLVAD_SOCKET_GROUP` | `mullvad`  | group for the Mullvad CLI / GUI; `""` = any local user (Mullvad's default) |
 | `USBGUARD_BLOCK_BLUETOOTH` | `yes` | USB Bluetooth adapters get `block` in the generated USBGuard rules |
+| `APP_UNITS`            | `(brave-browser)` | desktop ids the `appunit` section starts as their own service; `()` = none |
 | `KERNEL_ARGS`          | `(initcall_blacklist=af_alg_init page_alloc.shuffle=1 rd.shell=0 rd.emergency=halt)` | kernel args of the `kargs` section; `()` = none |
 
 ### Recommended order (low -> high risk)
@@ -88,6 +89,7 @@ sudo ./harden-workstation.sh mullvad  # then log out and in; mullvad status
 sudo rpm-ostree install usbguard && systemctl reboot
 sudo ./harden-workstation.sh usbguard # starts it, not enabled: test (keyboard, a new device
                                       # blocked, sudo usb-allow-storage), then the same command again enables it
+sudo ./harden-workstation.sh appunit  # close Brave, log out and in; open Brave from the menu
 sudo ./harden-workstation.sh time     # VPN connected; then chronyc -N authdata
 sudo grub2-setpassword                # by hand, before kargs (user root at the menu)
 sudo ./harden-workstation.sh kargs    # then reboot: LUKS unlock, Wi-Fi, VPN, a VM
@@ -115,6 +117,7 @@ sudo ./harden-workstation.sh kargs    # then reboot: LUKS unlock, Wi-Fi, VPN, a 
 | `netprivacy`  | not CIS: random MAC (Wi-Fi + cable), no hostname in DHCP (every profile), generic hostname (also as fallback, kernel arg: from the first second of boot), DHCP ids from that MAC, IPv6 temporary addresses, LLMNR + mDNS off in resolved, no DNS servers in Wi-Fi / cable profiles (only the tunnel) | new device on the router at every connect: no DHCP reservation; prompt shows `localhost`; no DNS without the tunnel |
 | `mullvad`     | not CIS: Mullvad management socket only for group `mullvad` (`MULLVAD_MANAGEMENT_SOCKET_GROUP`, drop-in `50-socket-group.conf`), my user added, daemon restarted (blocks while it restarts) | `mullvad` CLI works after logging out and in; other users get no access to the daemon |
 | `usbguard`    | not CIS: USBGuard rules from the devices present (only while rules.conf is empty; Bluetooth adapter blocked), usbguard CLI root only, `usb-allow-storage` in `/usr/local/sbin`, GNOME usb-protection off (locked), usbguard-dbus masked. Run twice: start + test, then enable | only devices in rules.conf work (locked or not, before login too); flash drive: `sudo usb-allow-storage` (storage-only devices, until unplugged); no Bluetooth; `usbguard` needs sudo |
+| `appunit`     | not CIS: `app-unit` in `/usr/local/bin`; for each id in `APP_UNITS` a copy of its desktop file in `/usr/local/share/applications` whose Exec runs `app-unit <id> ...`: systemd starts the app as `app-<id>@<pid>.service`. Fixes Brave (launcher forks before GNOME moves it) running inside `org.gnome.Shell@user.service` | the app in its own unit (sectop, `systemd-cgls`); its output in `journalctl --user`; after a Brave update run the section again |
 | `time`        | chrony: NTS only (Netnod + PTB), `authselectmode require`, `minsources 2`, no pool, no NTP servers from DHCP | no time sync without the tunnel (RTC keeps time) |
 | `kargs`       | not CIS: kernel args from `KERNEL_ARGS` via `rpm-ostree kargs` (next boot). `initcall_blacklist=af_alg_init`: AF_ALG (kernel crypto API from user space) off; `page_alloc.shuffle=1`: random page allocator; `rd.shell=0 rd.emergency=halt`: no initramfs root shell | `socket(AF_ALG)` fails; no Adiantum / Serpent / Twofish LUKS, BlueZ mesh, iwd; boot failure halts (fix: previous GRUB entry, or `e` + GRUB password) |
 
@@ -137,6 +140,7 @@ sudo rm /etc/systemd/system/mullvad-daemon.service.d/50-socket-group.conf
 sudo systemctl daemon-reload && sudo systemctl restart mullvad-daemon
 sudo systemctl disable --now usbguard               # USB protection off
 sudo usbguard append-rule 'allow id <vid>:<pid> ...'   # one device for good (sudo usbguard list-devices)
+sudo rm /usr/local/share/applications/brave-browser.desktop /usr/local/bin/app-unit   # appunit off
 sudo cp /var/backups/hardening/<time>/etc/chrony.conf /etc/ && sudo systemctl restart chronyd
 sudo rpm-ostree kargs --delete=initcall_blacklist=af_alg_init   # then reboot
 sudo rpm-ostree kargs --delete=page_alloc.shuffle=1 --delete=rd.shell=0 --delete=rd.emergency=halt

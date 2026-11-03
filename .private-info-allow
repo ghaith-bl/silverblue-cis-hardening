@@ -1,0 +1,7 @@
+# Reviewed hits of tools/check-private-info.sh that are fine in this repo.
+# Format and rules: the header of that script.
+#   <label> <path glob> <value regex>     full match, case-insensitive
+# Keep it short: every line hides something from the check.
+
+# systemd units with an instance (org.gnome.Shell@user.service ...) look like mail addresses.
+email  *  [\w.:\\-]+@[\w.-]*\.(?:service|socket|scope|slice|target|timer|mount)
