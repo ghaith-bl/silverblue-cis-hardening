@@ -30,7 +30,7 @@ DISABLE_USB_STORAGE="no"     # "yes" = USB flash drives / external disks stop wo
 DISABLE_BLUETOOTH="no"       # "yes" = no Bluetooth headsets / game controllers
 DISABLE_AVAHI="yes"          # "no"  if you use network printers or mDNS discovery
 ENABLE_NOISY_AUDIT="no"      # "yes" = log every chmod/chown/delete/denied-open by users (very noisy with Steam/Brave)
-MAKE_AUDIT_IMMUTABLE="no"    # "yes" = audit rules locked until reboot (-e 2). Enable after a week of testing.
+MAKE_AUDIT_IMMUTABLE="yes"   # "yes" = audit rules locked until reboot (-e 2): a rule change needs a reboot
 SSH_SERVER="off"             # "on" = keep sshd usable (hardened) so other machines can SSH INTO this laptop.
                              # Outgoing ssh from this laptop to VMs / homelab works either way.
 FINGERPRINT="disable"        # "keep" if you use a fingerprint reader ("disable" avoids fast faillock lockouts)
@@ -527,8 +527,12 @@ EOF
 EOF
   fi
 
+  # -e 2 (DISA STIG RHEL 9 V-258229): no rule change and no `auditctl -e 0` until
+  # reboot, root included. augenrules puts -e last, after every other file.
   if [[ $MAKE_AUDIT_IMMUTABLE == yes ]]; then
     printf '## Lock audit rules until reboot\n-e 2\n' | write_file "$d/99-finalize.rules" 0640
+  elif [[ -e $d/99-finalize.rules ]]; then
+    backup "$d/99-finalize.rules"; rm -f "$d/99-finalize.rules"; log "removed 99-finalize.rules (unlocked from the next boot)"
   fi
 
   # Not CIS (my design, 2026-11-01): who opens an AF_ALG socket (family 38). Measured
@@ -543,12 +547,19 @@ EOF
 EOF
 
   chmod 0640 "$d"/*.rules
+  if [[ $(auditctl -s | awk '$1 == "enabled" {print $2}') == 2 ]]; then
+    # Locked: the kernel refuses every change. Write audit.rules, load it at boot.
+    if ! augenrules >/dev/null; then warn "augenrules reported an error - check the files in $d"; fi
+    log "audit rules are locked (-e 2): the new rules load at the next reboot"
+    return 0
+  fi
   if ! augenrules --load >/dev/null; then
     warn "augenrules reported an error - run: sudo augenrules --load"
   fi
   n=$(auditctl -l | grep -vc '^No rules' || true)
   log "audit rules loaded in kernel: $n"
   if (( n < 40 )); then warn "fewer rules than expected - check the files in $d"; fi
+  if [[ $MAKE_AUDIT_IMMUTABLE == yes ]]; then log "audit rules locked now (-e 2): next change needs a reboot"; fi
 }
 
 sec_perms() {

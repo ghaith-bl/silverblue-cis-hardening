@@ -67,7 +67,7 @@ sudo ./harden-workstation.sh all
 | `FINGERPRINT`          | `disable`  | turn off `with-fingerprint` before enabling faillock |
 | `MIC_DISABLE`          | `internal` | `internal` / `all` / `no` - via WirePlumber, speakers unaffected |
 | `ENABLE_NOISY_AUDIT`   | `no`       | DAC / delete / failed-open audit rules (very noisy with Steam/Brave) |
-| `MAKE_AUDIT_IMMUTABLE` | `no`       | `-e 2` - enable after a week of testing |
+| `MAKE_AUDIT_IMMUTABLE` | `yes`      | `-e 2`: audit rules locked until reboot; `no` = unlocked from the next boot |
 | `IDLE_LOCK_SECONDS`    | `900`      | GNOME idle lock |
 | `MAC_MODE`             | `random`   | `random` = new MAC on every connect, `stable-ssid` = one per Wi-Fi network |
 | `GENERIC_HOSTNAME`     | `localhost`| hostname a new network may see on its first connect; `""` = keep mine |
@@ -109,7 +109,7 @@ sudo ./harden-workstation.sh kargs    # then reboot: LUKS unlock, Wi-Fi, VPN, a 
 | `cron`        | root-only cron dirs, `cron.allow` / `at.allow` | only root + your user can use crontab |
 | `sshd`        | hardened drop-in `40-cis.conf`, server masked | no incoming SSH |
 | `auditd`      | SYSLOG / SUSPEND actions instead of HALT, log ring 40 x 32 MiB | up to 1280 MiB in `/var/log/audit` |
-| `audit-rules` | ~70 CIS rules, `-c`, setuid list; not CIS: `af-alg` (AF_ALG sockets, 2 rules) | more log volume |
+| `audit-rules` | ~70 CIS rules, `-c`, setuid list, `-e 2` lock; not CIS: `af-alg` (AF_ALG sockets, 2 rules) | more log volume; once locked, a rule change needs a reboot |
 | `perms`       | audit config 0640, GRUB cfg 0600, shell rc files 0740 | none |
 | `mic`         | WirePlumber rule disables capture nodes | no microphone |
 | `netprivacy`  | not CIS: random MAC (Wi-Fi + cable), no hostname in DHCP (every profile), generic hostname (also as fallback, kernel arg: from the first second of boot), DHCP ids from that MAC, IPv6 temporary addresses, LLMNR + mDNS off in resolved, no DNS servers in Wi-Fi / cable profiles (only the tunnel) | new device on the router at every connect: no DHCP reservation; prompt shows `localhost`; no DNS without the tunnel |
@@ -141,6 +141,7 @@ sudo cp /var/backups/hardening/<time>/etc/chrony.conf /etc/ && sudo systemctl re
 sudo rpm-ostree kargs --delete=initcall_blacklist=af_alg_init   # then reboot
 sudo rpm-ostree kargs --delete=page_alloc.shuffle=1 --delete=rd.shell=0 --delete=rd.emergency=halt
 sudo rm /boot/grub2/user.cfg                     # GRUB password off
+sudo rm /etc/audit/rules.d/99-finalize.rules     # audit lock off, then reboot
 sudo rpm-ostree rollback                         # after booting the previous GRUB entry
 sudo ostree admin config-diff                    # every /etc change vs. image defaults
 ```
