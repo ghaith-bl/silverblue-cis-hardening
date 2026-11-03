@@ -151,6 +151,29 @@ for c in rows:
     print("%-18s %12d %14d  %s" % (c["name"], c["packets"], c["bytes"], c.get("comment", "")))
 PY
 
+# `nft -j list chain inet mullvad output` -> the addresses of Mullvad's API rule, one per
+# line: exactly `ip daddr <addr> tcp dport 443 meta skuid 0 accept` (any order). Mullvad
+# has it only while not connected (docs/mullvad.md); the relay rule has a mark, not skuid.
+read -r -d '' PY_API <<'PY' || true
+import json, sys
+want = [({"payload": {"protocol": "tcp", "field": "dport"}}, 443),
+        ({"meta": {"key": "skuid"}}, 0)]
+out = set()
+for o in json.loads(sys.argv[1])["nftables"]:
+    r = o.get("rule")
+    if not isinstance(r, dict) or r.get("chain") != "output":
+        continue
+    m = [e["match"] for e in r.get("expr", []) if "match" in e]
+    rest = [e for e in r.get("expr", []) if "match" not in e]
+    if rest != [{"accept": None}] or len(m) != 3 or any(x.get("op") != "==" for x in m):
+        continue
+    got = [(x["left"], x["right"]) for x in m]
+    ip = [v for k, v in got if k == {"payload": {"protocol": "ip", "field": "daddr"}}]
+    if len(ip) == 1 and isinstance(ip[0], str) and all(w in got for w in want):
+        out.add(ip[0])
+print("\n".join(sorted(out)))
+PY
+
 # local.conf -> nft commands on stdout; returns 1 (and prints nothing) on any problem.
 # Lines: "<set> <ipv4>[,<ipv4>...]", "#" starts a comment. Every set in LOCAL_SETS needed.
 # Log lines never show the addresses.
@@ -298,6 +321,43 @@ add element $T wg_fwmark { $list }"
     done < <(uplink_gateways)
 }
 
+cmd_api_update() {   # vpn_api4 <- the address inet mullvad allows; asks first
+    need_root; need_table
+    local json out old ans tmp
+    local new=()
+    json=$("$NFT" -j list chain inet mullvad output 2>/dev/null) ||
+        die "chain inet mullvad output not loaded (mullvad-daemon running?)"
+    out=$(python3 -I -c "$PY_API" "$json") || die "could not read chain inet mullvad output"
+    [[ -n $out ]] && mapfile -t new <<< "$out"
+    case ${#new[@]} in
+        0) die "no API rule in inet mullvad output: Mullvad shows it only while not connected
+       (mullvad disconnect, run this again, mullvad connect)" ;;
+        1) [[ ${new[0]} =~ $IP4_RE ]] || die "not an IPv4 address: ${new[0]}" ;;
+        *) die "more than one API address (${new[*]}): edit $LOCAL_FILE by hand" ;;
+    esac
+    local_cmds "$LOCAL_FILE" >/dev/null || die "fix $LOCAL_FILE first"
+    old=$(awk '$1 == "vpn_api4" { sub(/#.*/, ""); $1 = ""; gsub(/^[ ,]+|[ ,]+$/, ""); print }' \
+          "$LOCAL_FILE" | paste -sd, -)
+    if [[ $old == "${new[0]}" ]]; then
+        log "vpn_api4 is already ${new[0]}: nothing to change"
+        return 0
+    fi
+    echo "vpn_api4 in $LOCAL_FILE: ${old:-none}"
+    echo "Mullvad allows now:  ${new[0]}"
+    read -r -p "write the new address and sync? [y/N] " ans || ans=""
+    [[ $ans == [yY] ]] || { log "nothing changed"; return 0; }
+    # new file next to the old one (root 0600, same SELinux label), checked, then renamed
+    tmp=$(mktemp "$LOCAL_FILE.XXXXXX")
+    awk -v ip="${new[0]}" '$1 == "vpn_api4" { if (!done) print "vpn_api4 " ip; done = 1; next }
+                           { print }' "$LOCAL_FILE" > "$tmp"
+    local_cmds "$tmp" >/dev/null || { rm -f "$tmp"; die "new file invalid: $LOCAL_FILE unchanged"; }
+    cp -p "$LOCAL_FILE" "$LOCAL_FILE.bak"
+    mv "$tmp" "$LOCAL_FILE"
+    command -v restorecon >/dev/null && restorecon "$LOCAL_FILE"
+    log "vpn_api4: ${old:-none} -> ${new[0]} (old file: $LOCAL_FILE.bak)"
+    cmd_sync
+}
+
 cmd_router_open() {
     need_root; need_table
     local min=${1:-10} gw n=0
@@ -430,6 +490,8 @@ hostfw - host egress filter (nftables table inet hostfw)
   sync                       load vpn_dns4 + vpn_api4 from /etc/hostfw/local.conf,
                              refresh wg_fwmark + router4 (new network; NM dispatcher does it)
                              tunnel down: keeps last wg_fwmark (/var/lib/hostfw/wg_fwmark)
+  api-update                 vpn_api4 in /etc/hostfw/local.conf <- the API address
+                             inet mullvad allows (Mullvad not connected), asks y/N, sync
   router-open [MIN]          allow router web UI tcp 80,443 for MIN (default 10) minutes
   status                     mode, rollback, sets, counters
   counters [--json]          per-rule counters (exact)
@@ -451,6 +513,7 @@ main() {
         enforce)      cmd_enforce "$@" ;;
         confirm)      cmd_confirm ;;
         sync)         cmd_sync ;;
+        api-update)   cmd_api_update ;;
         router-open)  cmd_router_open "$@" ;;
         status)       cmd_status ;;
         counters)     cmd_counters "$@" ;;

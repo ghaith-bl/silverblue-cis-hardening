@@ -151,9 +151,6 @@ sudo ostree admin config-diff                    # every /etc change vs. image d
 
 ## Planned
 
-- hostfw `sync`: read the API address from `inet mullvad output` while disconnected and
-  update `vpn_api4` (today set by hand in /etc/hostfw/local.conf; a new Mullvad address =
-  blocked until updated)
 - option, only if a network ever blocks Direct: hostfw mirrors whatever `inet mullvad`
   allows at the time, and Bridges / Encrypted DNS proxy go back on
 - health-report script

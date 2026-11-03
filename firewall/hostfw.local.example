@@ -15,4 +15,5 @@
 #
 # Mullvad API outside the tunnel (disconnected, the address inet mullvad allows):
 #   mullvad disconnect; sudo nft list chain inet mullvad output | grep 'dport 443'; mullvad connect
+# Later changes: mullvad disconnect; sudo hostfw api-update; mullvad connect
 #vpn_api4 <address>

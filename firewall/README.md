@@ -34,8 +34,9 @@ Own nftables table `inet hostfw`, next to firewalld. Zero trust LAN: router only
 
 ```
 hostfw.nft                    ruleset (sets, counters, chains)
-hostfw.sh                     apply | observe | enforce | confirm | sync | router-open
-                              status | counters | report | remove | install | uninstall
+hostfw.sh                     apply | observe | enforce | confirm | sync | api-update
+                              router-open | status | counters | report | remove | install
+                              uninstall
 hostfw.service                boot unit (own unit - not nftables.service)
 nm-dispatcher/90-hostfw-sync  re-sync router4 (+ wg_fwmark while the tunnel is up) on network up
 hostfw.local.example         template for /etc/hostfw/local.conf (this machine's addresses)
@@ -112,8 +113,8 @@ Watch for:
 
 - `HFW-OUT-LEAK` with `MARK=` and no uid -> WireGuard mark mismatch -> `sync`, check `wg show wg0-mullvad fwmark`
 - `HFW-OUT-LEAK` from uid 0 tcp/443 while not connected -> Mullvad API on a new address, or its DoH
-  fallback: compare `vpn_api4` with `sudo nft list chain inet mullvad output` (disconnected),
-  fix /etc/hostfw/local.conf, `sudo hostfw sync`.
+  fallback: `mullvad disconnect`, `sudo hostfw api-update` (shows old / new, asks),
+  `mullvad connect`. sectop warns when the two differ (seen while not connected).
   DoH or other ports from uid 0 -> API access not Direct: `mullvad api-access get`
 - `HFW-OUT-LEAK` from uid 1000 -> program around the tunnel (or split tunneling)
 - `HFW-OUT-DNS` -> app with hardcoded resolver (inside tunnel = not a leak, still bypasses resolved)

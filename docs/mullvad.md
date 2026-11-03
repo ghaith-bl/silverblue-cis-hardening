@@ -62,8 +62,10 @@ Not used: split tunneling, custom DNS, DNS content blockers, Allow LAN.
 - Mullvad's own rule while disconnected (`mullvad disconnect; sudo nft list chain inet
   mullvad output`, 2026-10-26): `ip daddr <API address> tcp dport 443 meta skuid 0
   accept`. hostfw does the same: set `vpn_api4`, rule `out_vpn_api`. Another API address
-  (Mullvad changes it) = OUT-LEAK uid 0 tcp/443 again: compare with that chain, update
-  `vpn_api4` in /etc/hostfw/local.conf, then `sudo hostfw sync`. The DoH fallbacks stay blocked.
+  (Mullvad changes it) = OUT-LEAK uid 0 tcp/443 again, and sectop warns (`vpn api`).
+  Fix: `mullvad disconnect`, `sudo hostfw api-update` (old / new, y/N, writes
+  /etc/hostfw/local.conf, sync), `mullvad connect`. No automatic update: hostfw opens
+  nothing outside the tunnel on its own. The DoH fallbacks stay blocked.
 - Other API access methods (Bridges, Encrypted DNS proxy) use other addresses and ports
   (seen 2026-10-27: public DoH resolvers tcp/443, proxy on another port) -> out_leak.
   Disabled in the app; if `mullvad api-access get` shows anything but Direct, the daemon
