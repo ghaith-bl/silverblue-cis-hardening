@@ -44,10 +44,12 @@ KERNEL_ARGS=(initcall_blacklist=af_alg_init page_alloc.shuffle=1 rd.shell=0 rd.e
                              # kargs section; () = add none
 MULLVAD_SOCKET_GROUP="mullvad"  # mullvad section: only this group may use the Mullvad CLI / GUI
                              # "" = any local user (Mullvad's default)
+USBGUARD_BLOCK_BLUETOOTH="yes" # usbguard section: USB Bluetooth adapters blocked in the rules
+                             # generated from the devices present ("no" = allowed like the rest)
 TARGET_USER="${SUDO_USER:-}" # your login user (taken from sudo)
 
 BACKUP_ROOT="/var/backups/hardening/$(date +%Y%m%d-%H%M%S)"
-SECTIONS=(sysctl modules coredump journald gnome sudo pam su services cron sshd auditd audit-rules perms mic netprivacy mullvad time kargs)
+SECTIONS=(sysctl modules coredump journald gnome sudo pam su services cron sshd auditd audit-rules perms mic netprivacy mullvad usbguard time kargs)
 
 # -----------------------------------------------------------------------------
 # Helpers
@@ -732,6 +734,100 @@ EOF
   else warn "mullvad-daemon restart failed: systemctl status mullvad-daemon"; fi
 }
 
+## Not CIS. USBGuard: only devices in rules.conf work, locked or not, before login too.
+## A flash drive: sudo usb-allow-storage (installed here) allows ONE blocked device whose
+## every interface is mass storage, until it is unplugged. GNOME usb-protection off (it
+## allows every new device while unlocked); usbguard-dbus not needed (masked).
+## Package layered by hand first (rpm-ostree install usbguard, reboot).
+## Run 1 starts the daemon, NOT enabled (a reboot turns it off again): test, then run 2
+## enables it. The internal keyboard of many laptops is a USB device.
+sec_usbguard() {
+  local rules=/etc/usbguard/rules.conf conf=/etc/usbguard/usbguard-daemon.conf
+  local pk=/etc/polkit-1/rules.d/70-usbguard-gnome.rules tool=/usr/local/sbin/usb-allow-storage
+  local src gen changed=0
+  src="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/usbguard/usb-allow-storage.sh"
+  if ! rpm -q usbguard >/dev/null 2>&1; then
+    warn "usbguard not installed: rpm-ostree install usbguard, reboot, run again"
+    return 0
+  fi
+  [[ -f $src ]] || { warn "$src missing: run the script from the repo"; return 0; }
+
+  # rules: from the devices present now, only while the file has no rule (mine stays mine)
+  if grep -Eq '^[[:space:]]*(allow|block|reject)[[:space:]]' "$rules" 2>/dev/null; then
+    log "$rules has rules: kept"
+  else
+    gen="$(usbguard generate-policy)" || { warn "usbguard generate-policy failed"; return 0; }
+    if [[ $USBGUARD_BLOCK_BLUETOOTH == yes ]]; then
+      # only devices whose every interface is Bluetooth (e0:01:01)
+      gen="$(sed -E '/ with-interface (e0:01:01|\{ (e0:01:01 )+\}) /s/^allow /block /' <<<"$gen")"
+    fi
+    grep -q ' 03:01:01' <<<"$gen" || warn "no USB keyboard in the rules (fine if the keyboard is not USB)"
+    write_file "$rules" 0600 <<<"$gen"
+    log "$(grep -c '^allow ' "$rules") allow / $(grep -c '^block ' "$rules") block rules from the devices present now"
+    changed=1
+  fi
+
+  # IPC (usbguard CLI) for root only; Fedora default also lets wheel change rules without
+  # a password
+  if grep -qx 'IPCAllowedGroups=' "$conf"; then
+    log "usbguard IPC: root only"
+  else
+    backup "$conf"
+    sed -i -E 's/^IPCAllowedGroups=.*/IPCAllowedGroups=/' "$conf"
+    grep -qx 'IPCAllowedGroups=' "$conf" || printf 'IPCAllowedGroups=\n' >> "$conf"
+    restorecon -F "$conf" 2>/dev/null || true
+    log "usbguard IPC: root only (usbguard CLI needs sudo)"
+    changed=1
+  fi
+
+  # flash drives: a root owned copy, a root tool never runs from my home
+  if cmp -s "$src" "$tool"; then
+    log "$tool up to date"
+  else
+    backup "$tool"
+    install -o root -g root -m 0755 "$src" "$tool"
+    restorecon -F "$tool" 2>/dev/null || true
+    log "installed $tool (flash drive: sudo usb-allow-storage)"
+  fi
+
+  # GNOME usb-protection off + locked (GNOME default is on)
+  if [[ -e $pk ]]; then
+    backup "$pk"
+    rm -f "$pk"
+    log "removed $pk"
+  fi
+  grep -qs 'system-db:local' /etc/dconf/profile/user || warn "no system-db:local in /etc/dconf/profile/user: run the gnome section first"
+  write_file /etc/dconf/db/local.d/90-usbguard 0644 <<'EOF'
+[org/gnome/desktop/privacy]
+usb-protection=false
+EOF
+  write_file /etc/dconf/db/local.d/locks/90-usbguard 0644 <<'EOF'
+/org/gnome/desktop/privacy/usb-protection
+EOF
+  dconf update && log "dconf updated"
+  if rpm -q usbguard-dbus >/dev/null 2>&1; then
+    systemctl disable --now usbguard-dbus.service >/dev/null 2>&1 || true
+    systemctl mask usbguard-dbus.service >/dev/null 2>&1 && log "usbguard-dbus masked"
+    warn "usbguard-dbus not needed: rpm-ostree uninstall usbguard-dbus, reboot"
+  fi
+
+  if systemctl is-enabled -q usbguard.service; then
+    if (( changed )); then systemctl restart usbguard.service && log "usbguard restarted"; fi
+    log "usbguard enabled"
+  elif systemctl is-active -q usbguard.service; then
+    if (( changed )); then
+      systemctl restart usbguard.service
+      warn "config changed: usbguard restarted, still NOT enabled - test again, then run again"
+      return 0
+    fi
+    systemctl enable usbguard.service && log "usbguard enabled (from the next boot too)"
+  else
+    systemctl start usbguard.service
+    log "usbguard started, NOT enabled (a reboot turns it off again)"
+    log "test: keyboard + touchpad, a new device stays blocked, sudo usb-allow-storage; then run this section again"
+  fi
+}
+
 sec_time() {
   write_file /etc/chrony.conf 0644 <<'EOF'
 # harden-workstation.sh time: NTS only, no pool, no servers from DHCP
@@ -821,6 +917,7 @@ main() {
       mic)         sec_mic ;;
       netprivacy)  sec_netprivacy ;;
       mullvad)     sec_mullvad ;;
+      usbguard)    sec_usbguard ;;
       time)        sec_time ;;
       kargs)       sec_kargs ;;
       *)           warn "unknown section: $s" ;;

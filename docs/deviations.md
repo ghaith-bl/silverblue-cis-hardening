@@ -88,6 +88,30 @@ Input for an OpenSCAP tailoring file.
 - Repo: `gpgcheck=1` + `repo_gpgcheck=1` (signed metadata, refresh OK 2026-11-02), the
   3 key fingerprints match brave.com/signing-keys.
 
+## USBGuard: rules.conf only, flash drives by hand (not CIS, usbguard section, 2026-11-03)
+- What: only devices in rules.conf work, locked or unlocked, before login too. A flash
+  drive: `sudo usb-allow-storage` allows one blocked device until it is unplugged, only if
+  every interface is mass storage (08). A "flash drive" that is also a keyboard / mouse /
+  network adapter (BadUSB) is refused.
+- Why not GNOME usb-protection (tried 2026-11-02): unlocked it allows every new device
+  (temporary `allow id *:*`), locked it still allows HID-only devices and hubs. It needs
+  usbguard-dbus + a polkit rule that lets a program running as me change USB decisions
+  without a password. Now off (locked), no polkit rule, usbguard-dbus masked (not needed).
+- Cost: every flash drive = one command + sudo password. Fine: drives are rare here.
+- Storage only does not mean safe files: no automount (gnome section), do not run files
+  from unknown drives. Behind a hub nothing shows up (the hub is blocked): plug in directly.
+- `usb-allow-storage` reads `usbguard list-devices --blocked` with every quoted value
+  emptied first, so a device name or serial cannot fake the interface list. Installed root
+  owned in /usr/local/sbin: a root tool never runs from my home.
+- rules.conf: generated once from the devices present (`usbguard generate-policy`), never
+  overwritten. The internal keyboard is a USB device: without its rule, no keyboard
+  before login. External keyboard / mouse: `sudo usbguard append-rule` from its
+  list-devices line (id, name, hash, interfaces, connect type; no serial, no port).
+- Bluetooth adapter: `block` (not used). Back: change `block` to `allow` in rules.conf,
+  restart usbguard.
+- usbguard CLI: root only (`IPCAllowedGroups=` empty; Fedora default lets wheel change
+  rules without a password).
+
 ## Kernel args (not CIS)
 - `initcall_blacklist=af_alg_init` (kargs section, 2026-11-01): AF_ALG never starts.
   Why: user-space door into the kernel crypto code, deprecated upstream for its attack

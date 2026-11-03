@@ -61,3 +61,11 @@ Tests run after hardening + reboot. All passed.
 | GRUB password | `sudo test -f /boot/grub2/user.cfg && echo set`; menu: `e` on an entry | `set`; asks user `root` + password; plain boot asks nothing |
 | AF_ALG tries since boot | `sudo ausearch -k af-alg -sc socket -ts boot -i \| grep -o 'exe=[^ ]*' \| sort \| uniq -c` | only the test above (python3) |
 | unowned / world-writable | `sudo find / -xdev \( -nouser -o -nogroup \)` etc. | none |
+| USBGuard on | `systemctl is-enabled usbguard; systemctl is-active usbguard` | `enabled`, `active` |
+| usbguard-dbus gone | `rpm -q usbguard-dbus` | `package usbguard-dbus is not installed` |
+| usbguard CLI root only | `usbguard list-devices` (no sudo) | refused |
+| USB keyboard / mouse before login | reboot, type at the login screen | internal + external keyboard and mouse work (rules in rules.conf) |
+| new device blocked | plug a flash drive; `sudo usbguard list-devices --blocked` | listed as `block`, not in Files |
+| flash drive allowed | `sudo usb-allow-storage`, answer `y` | `storage only`, allowed, shows in Files |
+| allow until unplugged | unplug, plug again; `sudo usb-allow-storage`, answer `n` | new id, still blocked |
+| GNOME usb-protection off | `gsettings get org.gnome.desktop.privacy usb-protection; gsettings writable org.gnome.desktop.privacy usb-protection` | `false`, `false` |
