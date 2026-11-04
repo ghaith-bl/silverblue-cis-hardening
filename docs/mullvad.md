@@ -42,6 +42,10 @@ API access only Direct: the one method hostfw allows outside the tunnel
 
 Not used: split tunneling, custom DNS, DNS content blockers, Allow LAN.
 
+VMs (libvirt `virbr0`): blocked by the LAN block too. `sudo ./harden-workstation.sh
+kvmlan` marks host <-> VM packets the way Mullvad documents for split tunneling (own
+table `inet kvmlan`), Allow LAN stays off (docs/deviations.md).
+
 ## How it fits hostfw
 
 | item | value | hostfw |
@@ -53,6 +57,7 @@ Not used: split tunneling, custom DNS, DNS content blockers, Allow LAN.
 | routing | `not fwmark 0x6d6f6c65 lookup 1836018789` (table id = the mark) | - |
 | kill switch | table `inet mullvad`, policy drop in / out / forward | not touched |
 | split tunneling | `mullvad-exclude` (setuid root), ct mark 0xf41 + mark 0x6d6f6c65 | not accepted -> out_leak |
+| libvirt bridge | blocked while Allow LAN is off | `inet kvmlan` sets the same marks on `virbr0` (host <-> VM only); `if_trusted` / `in_vm` |
 
 - Relay transport carries the mark (only privileged processes can set it, Mullvad
   docs/security.md) -> out_wg.
@@ -86,6 +91,8 @@ Not used: split tunneling, custom DNS, DNS content blockers, Allow LAN.
 
     mullvad status -v                      # Connected, relay, tunnel wg0-mullvad
     mullvad lockdown-mode get              # on
+    mullvad lan get                        # block
+    systemctl is-active kvmlan             # active (VM lease + ssh)
     sudo nft list chain inet mullvad output | head -3     # policy drop
     resolvectl dns wg0-mullvad             # same as vpn_dns4 in /etc/hostfw/local.conf
     sudo hostfw status                     # wg_fwmark 0x6d6f6c65

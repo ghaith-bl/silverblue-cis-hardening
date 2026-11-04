@@ -66,6 +66,13 @@
   when DHCP restarts on wifi roaming (router band steering): the host route goes away,
   transport hits the dummy. Mullvad's kill switch is an nftables table, its routing uses
   a mark: no host route to lose (2026-10-26).
+- Changing the VPN client means testing the VMs again: Mullvad's LAN block (Allow LAN off)
+  also covers `virbr0`, so the VMs lost DHCP and ssh. Found 9 days after the switch, on
+  the first VM use. Mullvad's split tunneling marks on the bridge fix it (kvmlan,
+  2026-11-04).
+- `virsh net-start` while a VM runs: the VM's tap leaves the bridge and does not come
+  back. Network first, then the VM; else `virsh shutdown` + `virsh start` (a reboot
+  inside the VM is not enough).
 - A VPN client that needs its API before the tunnel is up needs a way out of an egress
   filter. Check it on the host, not from the docs: Mullvad marks only the relay
   transport, its API calls go out as uid 0 without the mark (2026-10-26).

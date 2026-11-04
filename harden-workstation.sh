@@ -44,6 +44,8 @@ KERNEL_ARGS=(initcall_blacklist=af_alg_init page_alloc.shuffle=1 rd.shell=0 rd.e
                              # kargs section; () = add none
 MULLVAD_SOCKET_GROUP="mullvad"  # mullvad section: only this group may use the Mullvad CLI / GUI
                              # "" = any local user (Mullvad's default)
+MULLVAD_VM_BRIDGES=(virbr0)  # kvmlan section: libvirt bridges outside Mullvad's LAN block (Allow LAN
+                             # stays off; same names as if_vm in firewall/hostfw.nft); () = none
 USBGUARD_BLOCK_BLUETOOTH="yes" # usbguard section: USB Bluetooth adapters blocked in the rules
                              # generated from the devices present ("no" = allowed like the rest)
 APP_UNITS=(brave-browser)    # appunit section: desktop ids started as their own service (launcher
@@ -51,7 +53,7 @@ APP_UNITS=(brave-browser)    # appunit section: desktop ids started as their own
 TARGET_USER="${SUDO_USER:-}" # your login user (taken from sudo)
 
 BACKUP_ROOT="/var/backups/hardening/$(date +%Y%m%d-%H%M%S)"
-SECTIONS=(sysctl modules coredump journald gnome sudo pam su services cron sshd auditd audit-rules perms mic netprivacy mullvad usbguard appunit time kargs)
+SECTIONS=(sysctl modules coredump journald gnome sudo pam su services cron sshd auditd audit-rules perms mic netprivacy mullvad kvmlan usbguard appunit time kargs)
 
 # -----------------------------------------------------------------------------
 # Helpers
@@ -747,6 +749,92 @@ EOF
   else warn "mullvad-daemon restart failed: systemctl status mullvad-daemon"; fi
 }
 
+## Not CIS. Mullvad with Allow LAN off also blocks the libvirt bridge: no DHCP lease in the
+## VMs, host -> VM ssh refused (host 2026-11-04, Mullvad 2026.5, lockdown on). Allow LAN
+## would open every private range on every network. Instead Mullvad's documented marks
+## (ct mark 0xf41 + mark 0x6d6f6c65, "Split tunneling with Linux (advanced)") on host <-> VM
+## packets of MULLVAD_VM_BRIDGES only, own table inet kvmlan: marks only, no accept / drop,
+## Mullvad's own table not touched. Mark chains between -200 and 0 (Mullvad: lower leaks the
+## tunnel address); here -100. VM internet is forwarded traffic, never marked: tunnel only.
+## firewalld zone libvirt still decides what a VM may reach on the host.
+sec_kvmlan() {
+  local nft=/etc/kvmlan.nft unit=/etc/systemd/system/kvmlan.service
+  local br list="" rules unit_text lan
+  if (( ${#MULLVAD_VM_BRIDGES[@]} == 0 )); then
+    log "MULLVAD_VM_BRIDGES empty: nothing to do (remove: README Rollback)"; return 0
+  fi
+  if ! unit_exists mullvad-daemon.service; then
+    warn "mullvad-daemon.service not found - skipped"; return 0
+  fi
+  for br in "${MULLVAD_VM_BRIDGES[@]}"; do
+    [[ $br =~ ^[A-Za-z0-9_.-]{1,15}$ ]] || { warn "invalid bridge name '$br' - skipped"; return 0; }
+    list+="${list:+, }\"$br\""
+  done
+  rules=$(cat <<EOF
+#!/usr/sbin/nft -f
+# harden-workstation.sh kvmlan: libvirt bridges outside Mullvad's LAN block.
+# Marks only (no accept / drop): Mullvad's chains (priority 0) pass marked packets.
+# https://mullvad.net/help/split-tunneling-with-linux-advanced
+table inet kvmlan
+delete table inet kvmlan
+
+table inet kvmlan {
+	chain kvm_in {
+		type filter hook input priority -100; policy accept;
+		iifname { $list } ct mark set 0x00000f41 meta mark set 0x6d6f6c65
+	}
+	chain kvm_out {
+		type route hook output priority -100; policy accept;
+		oifname { $list } ct mark set 0x00000f41 meta mark set 0x6d6f6c65
+	}
+}
+EOF
+)
+  nft -c -f - <<<"$rules" || { warn "nft syntax check failed - nothing written"; return 0; }
+  if [[ -f $nft ]] && [[ $(cat "$nft") == "$rules" ]]; then
+    log "$nft up to date"
+  else
+    write_file "$nft" 0644 <<<"$rules"
+  fi
+  unit_text=$(cat <<'EOF'
+[Unit]
+Description=kvmlan - libvirt bridges outside Mullvad's LAN block (nftables table inet kvmlan)
+Documentation=https://mullvad.net/help/split-tunneling-with-linux-advanced
+DefaultDependencies=no
+Wants=network-pre.target
+Before=network-pre.target shutdown.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/kvmlan.nft
+ExecReload=/usr/sbin/nft -f /etc/kvmlan.nft
+ExecStop=/usr/sbin/nft delete table inet kvmlan
+
+[Install]
+WantedBy=multi-user.target
+EOF
+)
+  if [[ -f $unit ]] && [[ $(cat "$unit") == "$unit_text" ]]; then
+    log "$unit up to date"
+  else
+    write_file "$unit" 0644 <<<"$unit_text"
+    systemctl daemon-reload
+  fi
+  systemctl enable kvmlan.service >/dev/null 2>&1 && log "kvmlan.service enabled"
+  if systemctl reload-or-restart kvmlan.service; then log "table inet kvmlan loaded: ${MULLVAD_VM_BRIDGES[*]}"
+  else warn "kvmlan.service failed: journalctl -u kvmlan"; fi
+  lan=$(mullvad lan get 2>/dev/null || true)
+  case $lan in
+    *block*) log "Mullvad Allow LAN: off (only the bridges are open)" ;;
+    *allow*) warn "Mullvad Allow LAN is on: whole LAN open, this table is not needed (mullvad lan set block)" ;;
+    *)       warn "could not read: mullvad lan get" ;;
+  esac
+  log "test: in the VM nmcli device status (connected), curl https://am.i.mullvad.net/connected"
+  log "VM without a lease: in the VM sudo nmcli connection up <profile>"
+}
+
 ## Not CIS. USBGuard: only devices in rules.conf work, locked or not, before login too.
 ## A flash drive: sudo usb-allow-storage (installed here) allows ONE blocked device whose
 ## every interface is mass storage, until it is unplugged. GNOME usb-protection off (it
@@ -966,6 +1054,7 @@ main() {
       mic)         sec_mic ;;
       netprivacy)  sec_netprivacy ;;
       mullvad)     sec_mullvad ;;
+      kvmlan)      sec_kvmlan ;;
       usbguard)    sec_usbguard ;;
       appunit)     sec_appunit ;;
       time)        sec_time ;;

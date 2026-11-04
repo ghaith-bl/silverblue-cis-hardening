@@ -77,6 +77,24 @@ Input for an OpenSCAP tailoring file.
   Cost: no DNS without the tunnel (captive portals: already closed by lockdown). New
   networks get DHCP DNS: run netprivacy again.
 - hostfw observe week ended after 1 day (2026-10-19). Findings: firewall/docs/observe-log.md.
+- VMs with Allow LAN off (kvmlan section, 2026-11-04). Problem: Mullvad's LAN block also
+  covers `virbr0`: no DHCP lease in the VMs, host -> VM ssh refused at once (found
+  2026-11-04, Mullvad since 2026-10-26; `mullvad lan get` = block, hostfw logged nothing).
+  Not Allow LAN: it opens every private range on every network (zero trust LAN).
+  Instead: own table `inet kvmlan`, Mullvad's documented split tunneling marks
+  (ct mark 0xf41 + mark 0x6d6f6c65) on host <-> VM packets of `virbr0` only, input
+  + route output at priority -100 (Mullvad: between -200 and 0, lower leaks the tunnel
+  address). Marks only, no accept / drop; Mullvad's own table not touched.
+  Still guarded: firewalld zone `libvirt` (what a VM may reach on the host), hostfw
+  forward (VM -> tunnel only), Mullvad's forward chain. VM internet = forwarded traffic,
+  never marked. A host program sending to `virbr0` only reaches the VMs.
+  Tested 2026-11-04 (runtime table): VM lease + ping to a public address OK; in the VM
+  `curl https://am.i.mullvad.net/connected` = connected; `mullvad disconnect` -> same VM
+  ping `Packet filtered` from the host's `virbr0` address, 100 % loss; `mullvad connect`
+  -> back.
+  Cost: hand-written marks are Mullvad's "privacy danger" area: a wrong rule can leak;
+  keep the file as tested. A new libvirt network: its bridge in `MULLVAD_VM_BRIDGES` and
+  in hostfw `if_vm` / `if_trusted`. Undo: `sudo systemctl disable --now kvmlan`.
 
 ## Brave: RPM, not Flatpak (not CIS)
 - Brave's own RPM repo, layered (browsers/README.md). Why: Brave's own build with the

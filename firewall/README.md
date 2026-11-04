@@ -24,6 +24,7 @@ Own nftables table `inet hostfw`, next to firewalld. Zero trust LAN: router only
 | `inet firewalld` | firewalld | ingress (zones: drop, libvirt) |
 | `inet hostfw` | this repo | egress, forward, inbound logging |
 | `inet mullvad` | mullvad-daemon | kill switch (lockdown), DNS, relay transport, split tunnel marks |
+| `inet kvmlan` | harden-workstation.sh kvmlan | marks host <-> VM packets on `virbr0` so Mullvad's LAN block lets them pass (no accept / drop) |
 | `ip/ip6 libvirt_network` | libvirt | VM NAT / forward |
 
 - separate base chains on the same hook all run. drop/reject = final. accept = next table decides
@@ -228,6 +229,7 @@ Setup, settings and how it fits hostfw: [../docs/mullvad.md](../docs/mullvad.md)
   table reload empties the set until the watcher's next look (it is restarted)
 - L2 (ARP) not covered by `inet` table
 - new libvirt network / rootful containers -> add the bridge to `if_vm` + `if_trusted`
+  and to `MULLVAD_VM_BRIDGES` (kvmlan section), else Mullvad blocks it
 - `lan_allow4` needs static IPs (router DHCP reservation)
 - `router4` = current gateway only; other networks: `sync` / dispatcher
 

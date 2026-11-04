@@ -11,6 +11,10 @@ Tests run after hardening + reboot. All passed.
 | VPN API outside the tunnel | `mullvad api-access list`; `mullvad disconnect && sleep 3 && mullvad api-access test 1`; `sudo hostfw counters \| grep out_vpn_api` (then `mullvad connect`) | only Direct enabled; `Success!`; `out_vpn_api` grows, no OUT-LEAK to the API address |
 | VM SSH | `ssh toolkit-lab` | OK |
 | VM internet | `curl -sI https://archlinux.org` | `HTTP/2 200` |
+| VM lease, Allow LAN off | `mullvad lan get`; in the VM: `nmcli device status` | `block`; `enp1s0 ... connected` |
+| kvmlan table | `systemctl is-active kvmlan`; `sudo nft list table inet kvmlan` | `active`; chains `kvm_in`, `kvm_out` |
+| VM via Mullvad | in the VM: `curl https://am.i.mullvad.net/connected` | `You are connected to Mullvad` |
+| VM kill switch | `mullvad disconnect`; in the VM: `curl -sI -m 10 https://archlinux.org`; `mullvad connect`; again | fails; `HTTP/2 200` after connect |
 | VM large download (MTU) | `curl -o /dev/null 'https://speed.cloudflare.com/__down?bytes=20000000'` | 20000000 bytes |
 | Podman / kind | `podman ps`, `kubectl get nodes` | `Ready` |
 | Steam game | launch | OK |
