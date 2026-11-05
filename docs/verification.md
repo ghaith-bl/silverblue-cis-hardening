@@ -20,6 +20,34 @@ Tests run after hardening + reboot. All passed.
 | Steam game | launch | OK |
 | Speakers | `speaker-test -c 2 -t wav -l 1` | OK |
 
+## Account split (2026-11-05)
+
+`sudo tools/check-accounts.sh <admin> null` from the admin console, after a reboot:
+
+| Check | Expected |
+|-------|----------|
+| wheel members | `<admin>` |
+| mullvad members | `<admin>` |
+| sectop: admin / daily | member / not a member |
+| live wheel / mullvad | no daily process holds it |
+| sudo: daily / admin | not allowed / `(ALL) ALL` |
+| root password | locked |
+| gdm list / gdm login | admin hidden / admin refused (pam_succeed_if) |
+| home admin / home null | `700 <admin>` / `700 null` |
+| sysusers admin / daily | `m <admin> sectop` / no line |
+| mullvad lockdown | on |
+| unit sectop, sectop-net, sectop-user@null, sectop-whois | active |
+| summary | `0 FAIL` |
+
+| Check | Command | Expected |
+|-------|---------|----------|
+| daily user has no sudo | as null: `sudo -v` | `may not run sudo`, line in `/var/log/sudo.log` |
+| admin not in GDM | GDM user list; typing the admin name at GDM | not listed; refused |
+| admin on the console | Ctrl+Alt+F3, admin login, `sudo -v` | OK |
+| helper channel | `ls -ld /run/sectop-user/null; ls -l /run/sectop-user/null` | `null sectop-feed` 0750, `socks.json` 0640 |
+| daily user can't read sectop | as null: `cat /run/sectop/state.json` | Permission denied |
+| split tunneling blocked | as null: `mullvad-exclude curl -m 10 https://am.i.mullvad.net/connected`; `sudo hostfw counters \| grep out_split` | fails fast; out_split grows, `HFW-OUT-SPLIT` with UID=1000 |
+
 ## Hardening in effect
 
 | Check | Command | Expected |

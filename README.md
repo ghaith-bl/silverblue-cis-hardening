@@ -75,6 +75,8 @@ sudo ./harden-workstation.sh all
 | `MULLVAD_VM_BRIDGES`   | `(virbr0)` | libvirt bridges the `kvmlan` section takes out of Mullvad's LAN block (same as `if_vm` in hostfw); `()` = none |
 | `USBGUARD_BLOCK_BLUETOOTH` | `yes` | USB Bluetooth adapters get `block` in the generated USBGuard rules |
 | `APP_UNITS`            | `(brave-browser)` | desktop ids the `appunit` section starts as their own service; `()` = none |
+| `ADMIN_USER`           | `""` (env) | `accounts`: CLI-only admin (wheel, text console, hidden from GDM); `""` = one account. Given on the command line: `sudo ADMIN_USER=<admin> DAILY_USER=<daily> ./harden-workstation.sh ...` (names stay out of git) |
+| `DAILY_USER`           | `""` (env) | `accounts`: GNOME daily user, no sudo; also the user of the desktop steps (cron.allow, shell rc, mic, appunit). Two accounts: give it to every run from the admin |
 | `KERNEL_ARGS`          | `(initcall_blacklist=af_alg_init page_alloc.shuffle=1 rd.shell=0 rd.emergency=halt)` | kernel args of the `kargs` section; `()` = none |
 
 ### Recommended order (low -> high risk)
@@ -85,6 +87,12 @@ systemctl reboot        # test VPN, VMs, podman, a game
 sudo ./harden-workstation.sh sudo     # then: sudo -k && sudo true
 sudo ./harden-workstation.sh gnome su # then: su - (must fail), sudo true
 sudo ./harden-workstation.sh pam      # with a root shell open
+sudo ADMIN_USER=<admin> DAILY_USER=<daily> ./harden-workstation.sh accounts
+                                      # run 1: admin account, GDM hidden + refused, homes 0700
+                                      # admin password on a text console (Ctrl+Alt+F3):
+                                      #   sudo passwd <admin>   (never inside GNOME)
+                                      # tty3 as the admin: sudo -v, then run 2 from there
+                                      # (same command): daily user out of wheel + mullvad, reboot
 sudo ./harden-workstation.sh netprivacy  # close Brave first, then log out and in
 sudo ./harden-workstation.sh mullvad  # then log out and in; mullvad status
 sudo ./harden-workstation.sh kvmlan   # VMs: lease + ssh with Allow LAN off; in a VM: nmcli device status
@@ -109,6 +117,7 @@ sudo ./harden-workstation.sh kargs    # then reboot: LUKS unlock, Wi-Fi, VPN, a 
 | `sudo`        | `use_pty`, `/var/log/sudo.log`, 5 min timeout | password asked again after 5 min |
 | `pam`         | faillock (5 tries -> 15 min), pwhistory (24), pwquality (14 chars, 4 classes), no empty passwords | lockout includes lock screen |
 | `su`          | `su` limited to empty group `sugroup` | use `sudo` |
+| `accounts`    | CIS Controls v8 5.4: admin `ADMIN_USER` (wheel, own group, AccountsService `SystemAccount=true`, `auth requisite pam_succeed_if.so user != <admin>` as line 1 of `/etc/pam.d/gdm-password`), homes 0700. Run 2 only from the admin (its sudo = proof it works; root is locked): daily user out of `wheel` and `MULLVAD_SOCKET_GROUP`, admin in it | admin: text console only, not in the GDM list, GDM refuses it; daily user: no sudo, no Mullvad CLI; `mullvad` / `rpm-ostree` / `virsh` from the admin |
 | `services`    | mask rpcbind / nfs / avahi, disable+mask nftables.service (not stopped live) | no mDNS |
 | `cron`        | root-only cron dirs, `cron.allow` / `at.allow` | only root + your user can use crontab |
 | `sshd`        | hardened drop-in `40-cis.conf`, server masked | no incoming SSH |
@@ -117,7 +126,7 @@ sudo ./harden-workstation.sh kargs    # then reboot: LUKS unlock, Wi-Fi, VPN, a 
 | `perms`       | audit config 0640, GRUB cfg 0600, shell rc files 0740 | none |
 | `mic`         | WirePlumber rule disables capture nodes | no microphone |
 | `netprivacy`  | not CIS: random MAC (Wi-Fi + cable), no hostname in DHCP (every profile), generic hostname (also as fallback, kernel arg: from the first second of boot), DHCP ids from that MAC, IPv6 temporary addresses, LLMNR + mDNS off in resolved, no DNS servers in Wi-Fi / cable profiles (only the tunnel) | new device on the router at every connect: no DHCP reservation; prompt shows `localhost`; no DNS without the tunnel |
-| `mullvad`     | not CIS: Mullvad management socket only for group `mullvad` (`MULLVAD_MANAGEMENT_SOCKET_GROUP`, drop-in `50-socket-group.conf`), my user added, daemon restarted (blocks while it restarts) | `mullvad` CLI works after logging out and in; other users get no access to the daemon |
+| `mullvad`     | not CIS: Mullvad management socket only for group `mullvad` (`MULLVAD_MANAGEMENT_SOCKET_GROUP`, drop-in `50-socket-group.conf`), the admin added (`ADMIN_USER`; one account: my user), daemon restarted (blocks while it restarts) | `mullvad` CLI works after logging out and in, for the admin only; socket access = full daemon control (disconnect, lockdown off) |
 | `kvmlan`      | not CIS: own nftables table `inet kvmlan` (`/etc/kvmlan.nft`, `kvmlan.service`): Mullvad's split tunneling marks (ct mark 0xf41 + mark 0x6d6f6c65) on host <-> VM packets of `MULLVAD_VM_BRIDGES` only. Marks, no accept / drop; Mullvad's table and Allow LAN (off) not changed | VMs get a DHCP lease, host <-> VM ssh works; LAN stays blocked; VM internet only via the tunnel (blocked while Mullvad is disconnected) |
 | `usbguard`    | not CIS: USBGuard rules from the devices present (only while rules.conf is empty; Bluetooth adapter blocked), usbguard CLI root only, `usb-allow-storage` in `/usr/local/sbin`, GNOME usb-protection off (locked), usbguard-dbus masked. Run twice: start + test, then enable | only devices in rules.conf work (locked or not, before login too); flash drive: `sudo usb-allow-storage` (storage-only devices, until unplugged); no Bluetooth; `usbguard` needs sudo |
 | `appunit`     | not CIS: `app-unit` in `/usr/local/bin`; for each id in `APP_UNITS` a copy of its desktop file in `/usr/local/share/applications` whose Exec runs `app-unit <id> ...`: systemd starts the app as `app-<id>@<pid>.service`. Fixes Brave (launcher forks before GNOME moves it) running inside `org.gnome.Shell@user.service` | the app in its own unit (sectop, `systemd-cgls`); its output in `journalctl --user`; after a Brave update run the section again |
@@ -139,6 +148,9 @@ sudo rm -r /etc/systemd/system/systemd-hostnamed.service.d && sudo systemctl dae
 sudo rpm-ostree kargs --delete=SYSTEMD_DEFAULT_HOSTNAME=localhost   # then reboot
 sudo hostnamectl set-hostname <name>             # per profile: nmcli con modify <uuid> ipv4.dhcp-send-hostname -1
 sudo nmcli con modify <uuid> ipv4.ignore-auto-dns no   # router DNS back (or old profile: backup system-connections)
+sudo usermod -aG wheel <daily>                   # accounts: from the admin; then the
+sudo sed -i '1{/pam_succeed_if.so user != /d}' /etc/pam.d/gdm-password   # admin in GDM again
+sudo rm /var/lib/AccountsService/users/<admin>   # admin in the GDM list (after a reboot)
 sudo rm /etc/systemd/system/mullvad-daemon.service.d/50-socket-group.conf
 sudo systemctl daemon-reload && sudo systemctl restart mullvad-daemon
 sudo systemctl disable --now kvmlan              # VMs blocked by Mullvad again (table deleted)
@@ -159,6 +171,45 @@ sudo ostree admin config-diff                    # every /etc change vs. image d
 - Removing a sysctl file does not revert values until reboot.
 - `kernel.kexec_load_disabled` and `kernel.unprivileged_bpf_disabled = 1` are one-way until reboot.
 
+## Two accounts (2026-11-05)
+
+CIS Controls v8 5.4, NIST SP 800-53 AC-6(2), NSA/CISA AA23-278A #2: admin work from an
+account used for nothing else.
+
+| | admin (`ADMIN_USER`) | daily (`DAILY_USER`) |
+|---|---|---|
+| login | text console only (GDM hides + refuses it) | GNOME |
+| groups | wheel, mullvad, sectop | own group only |
+| work | sudo, rpm-ostree, mullvad, `sudo virsh`, install scripts, sectop UI | browsers, Steam, rootless Podman / kind, toolbox, git push |
+| password | memorized + offline copy; never typed in GNOME | own |
+
+- Root stays locked. Order matters: the daily user leaves wheel only after the admin's
+  sudo works (run 2 of `accounts` refuses to run from anyone else)
+- Repos: the daily user develops, tests, commits, pushes; the admin keeps its own clones
+  (https), `git pull`, reviews (`git log -p`), then `sudo ./install.sh`. The admin never
+  runs code from the daily user's home
+- Host changes: one script per step (pre-check, change, verify, report), handed from
+  the daily user to the admin and reviewed before it runs:
+
+```bash
+# daily user (GNOME)
+install -d -m 0755 /tmp/to-admin && install -m 0644 step.sh /tmp/to-admin/
+sha256sum step.sh                       # compare on a second device
+# admin (Ctrl+Alt+F3)
+cd ~/my-project/silverblue-cis-hardening && tools/admin-run.sh step.sh
+```
+
+- `tools/admin-run.sh`: private copy in `~/admin-inbox`, shows sha256 + sudo lines + the
+  whole script, runs only after the first 8 characters of the sha256 are typed, as the
+  admin (sudo per line: each root command in sudo.log and sectop), output copy for the
+  daily user in `/tmp/from-admin/`. admin-run itself changes only via `git pull` + review
+- `sudo tools/check-accounts.sh <admin> <daily>`: read-only check, one PASS / FAIL line
+  each (wheel, mullvad, sectop members, processes still holding old groups, sudo policy,
+  root locked, GDM list + PAM line, homes 0700, sectop sysusers + units, Mullvad lockdown),
+  copy in `/tmp/check-accounts.*`. Exit 0 = no FAIL
+- sectop: `sudo ./install.sh --desktop-user <daily>` from the admin (UI as the admin,
+  user helper for the daily user), `sudo gpasswd -d <daily> sectop`
+
 ## Planned
 
 - option, only if a network ever blocks Direct: hostfw mirrors whatever `inet mullvad`
@@ -168,7 +219,7 @@ sudo ostree admin config-diff                    # every /etc change vs. image d
 ## Docs
 
 - [docs/deviations.md](docs/deviations.md) - what was not applied and why
-- [docs/verification.md](docs/verification.md) - tests run after hardening
+- [docs/verification.md](docs/verification.md) - tests run after hardening, account split check
 - [docs/secure-boot.md](docs/secure-boot.md) - Secure Boot on, NVIDIA driver removed
 - [docs/lessons-learned.md](docs/lessons-learned.md) - findings worth remembering
 - [firewall/README.md](firewall/README.md) - hostfw egress filter: design, rules, tests

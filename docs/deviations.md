@@ -19,14 +19,21 @@ Input for an OpenSCAP tailoring file.
 
 | Rule | Decision | Reason |
 |------|----------|--------|
-| `accounts_maximum_age_login_defs`, `accounts_minimum_age_login_defs`, `accounts_password_set_max_life_existing`, `accounts_password_set_min_life_existing` | skip | NIST SP 800-63B advises against forced periodic password changes |
-| `account_disable_post_pw_expiration` | skip | risk of locking out the only account |
+| `accounts_minimum_age_login_defs`, `accounts_password_set_min_life_existing` | skip | NIST SP 800-63B advises against forced periodic password changes (max age: Two accounts) |
 | `accounts_tmout` | skip | GNOME idle lock (15 min, locked) covers it |
 | `banner_etc_issue_cis`, `banner_etc_issue_net_cis`, `dconf_gnome_banner_enabled`, `dconf_gnome_login_banner_text`, `sshd_enable_warning_banner_net` | skip | legal banners - value in organisations, not on a personal device |
 | `package_systemd-journal-remote_installed` | skip (later) | needs a log server - planned for the homelab |
 | `accounts_passwords_pam_faillock_even_deny_root_or_root_unlock_time` | skip | root account is locked; `su` restricted to an empty group |
 | `ensure_root_password_configured` | skip | root is locked; emergency shell refuses access instead of opening unauthenticated |
 | `service_bluetooth_disabled` | skip | service already disabled manually; masking optional |
+
+## Two accounts (accounts section, 2026-11-05)
+
+| Rule | Decision | Reason |
+|------|----------|--------|
+| `accounts_maximum_age_login_defs` (`PASS_MAX_DAYS` <= 365), `accounts_password_set_max_life_existing` | admin and daily user: no expiry (`chage -M 99999`) | NIST SP 800-63B (memorized secrets): no forced periodic change, change on compromise; CIS Password Policy Guide (2023) agrees for long passwords. A forced change pushes to weaker or written-down admin passwords. Change it when there is any sign of compromise |
+| `account_disable_post_pw_expiration` | skip | with no expiry it never triggers; root locked, the admin is the only sudo account |
+| admin password | memorized + offline copy (paper / phone password manager), never in storage the daily user opens, never typed in GNOME | a keylogger or a password manager in the daily session must not get it |
 
 ## Changed on purpose
 
