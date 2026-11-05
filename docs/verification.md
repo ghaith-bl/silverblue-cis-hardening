@@ -29,6 +29,7 @@ Tests run after hardening + reboot. All passed.
 | wheel members | `<admin>` |
 | mullvad members | `<admin>` |
 | sectop: admin / daily | member / not a member |
+| sectop-feed members / helper dir | `-` (none) / `null:sectop-feed 750` |
 | live wheel / mullvad | no daily process holds it |
 | sudo: daily / admin | not allowed / `(ALL) ALL` |
 | root password | locked |

@@ -76,6 +76,11 @@ main() {
     in_group "$DAILY" sectop && out FAIL "sectop: daily" "member | want: not a member" \
                              || out PASS "sectop: daily" "not a member"
   fi
+  if getent group sectop-feed >/dev/null; then      # sectop 2026-11-05: unit Group= only
+    expect "sectop-feed members" "$(members sectop-feed)" ""
+    expect "helper dir" "$(stat -c '%U:%G %a' "/run/sectop-user/$DAILY" 2>/dev/null)" \
+           "$DAILY:sectop-feed 750"
+  fi
   out INFO "daily groups" "$(id -nG "$DAILY")"
 
   # --- old credentials: daily processes started before the change
