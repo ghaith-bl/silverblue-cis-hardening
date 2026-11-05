@@ -66,10 +66,9 @@ main() {
 
   # --- privileged groups: admin only
   expect "wheel members" "$(members wheel)" "$ADMIN"
-  for g in mullvad; do
-    getent group "$g" >/dev/null || continue
-    expect "$g members" "$(members "$g")" "$ADMIN"
-  done
+  if getent group mullvad >/dev/null; then
+    expect "mullvad members" "$(members mullvad)" "$ADMIN"
+  fi
   if getent group sectop >/dev/null; then
     in_group "$ADMIN" sectop && out PASS "sectop: admin" "member" \
                              || out FAIL "sectop: admin" "not a member"
