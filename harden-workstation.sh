@@ -50,10 +50,21 @@ USBGUARD_BLOCK_BLUETOOTH="yes" # usbguard section: USB Bluetooth adapters blocke
                              # generated from the devices present ("no" = allowed like the rest)
 APP_UNITS=(brave-browser)    # appunit section: desktop ids started as their own service (launcher
                              # forks before GNOME moves it: Chromium family); () = none
-TARGET_USER="${SUDO_USER:-}" # your login user (taken from sudo)
+ADMIN_USER="${ADMIN_USER:-}" # accounts section: CLI-only admin (wheel, text console, hidden
+                             # from GDM); "" = one account, the section does nothing
+DAILY_USER="${DAILY_USER:-}" # accounts section: GNOME daily user, no sudo. Also the user of
+                             # the desktop steps (cron.allow, shell rc files, mic, appunit)
+                             # Names stay out of git: sudo ADMIN_USER=<a> DAILY_USER=<d> ./...
+                             # (sudoers (ALL) ALL implies SETENV)
+# desktop steps act on the daily user when it exists; one account: the sudo user
+if [[ -n $DAILY_USER ]] && id "$DAILY_USER" >/dev/null 2>&1; then
+  TARGET_USER=$DAILY_USER
+else
+  TARGET_USER="${SUDO_USER:-}"
+fi
 
 BACKUP_ROOT="/var/backups/hardening/$(date +%Y%m%d-%H%M%S)"
-SECTIONS=(sysctl modules coredump journald gnome sudo pam su services cron sshd auditd audit-rules perms mic netprivacy mullvad kvmlan usbguard appunit time kargs)
+SECTIONS=(sysctl modules coredump journald gnome sudo pam su accounts services cron sshd auditd audit-rules perms mic netprivacy mullvad kvmlan usbguard appunit time kargs)
 
 # -----------------------------------------------------------------------------
 # Helpers
@@ -343,6 +354,92 @@ sec_su() {
   else
     warn "pam_rootok line not found in /etc/pam.d/su - nothing changed"
   fi
+}
+
+## Not CIS as a rule, CIS Controls v8 5.4 / NIST SP 800-53 AC-6(2) / NSA-CISA AA23-278A #2:
+## admin work from an account used for nothing else. ADMIN_USER: wheel, text console only
+## (hidden from GDM, GDM login refused). DAILY_USER: GNOME, browsers, no sudo.
+## Run 1 (any sudo user): admin account + GDM + homes. Its password is set by hand on a
+## text console. Run 2 from the admin itself (its sudo is the proof it works): the daily
+## user leaves wheel and the Mullvad group. Never the other way: root is locked, a daily
+## user out of wheel before the admin's sudo works = no sudo left.
+sec_accounts() {
+  local a=$ADMIN_USER d=$DAILY_USER as f pam=/etc/pam.d/gdm-password g
+  local line="auth       requisite   pam_succeed_if.so user != ${ADMIN_USER} quiet_success"
+  if [[ -z $a || -z $d ]]; then log "ADMIN_USER / DAILY_USER empty: one account, nothing to do"; return 0; fi
+  for f in "$a" "$d"; do
+    [[ $f =~ ^[a-z_][a-z0-9_-]{0,31}$ && $f != root ]] || { warn "bad user name '$f' - skipped"; return 0; }
+  done
+  [[ $a != "$d" ]] || { warn "ADMIN_USER = DAILY_USER - skipped"; return 0; }
+  id "$d" >/dev/null 2>&1 || { warn "no daily user $d - skipped"; return 0; }
+
+  # --- admin account: wheel, own group, bash
+  if id "$a" >/dev/null 2>&1; then
+    id -nG "$a" | tr ' ' '\n' | grep -qx wheel || { usermod -aG wheel "$a"; log "$a added to wheel"; }
+    log "admin $a: $(id "$a")"
+  else
+    useradd -m -U -G wheel -s /bin/bash -c "admin (text console)" "$a"
+    log "admin $a created (wheel, password locked until set)"
+  fi
+  as=$(passwd -S "$a" 2>/dev/null | awk '{print $2}')
+  if [[ $as != P && $as != PS ]]; then
+    warn "$a has no password: on a text console (Ctrl+Alt+F3), as $d: sudo passwd $a"
+    warn "  never type the admin password inside the GNOME session"
+  fi
+
+  # --- GDM: not listed, login refused (text console only)
+  f=/var/lib/AccountsService/users/$a
+  if [[ -f $f ]] && grep -qx 'SystemAccount=true' "$f"; then
+    log "$f: SystemAccount=true"
+  elif [[ -f $f ]]; then
+    backup "$f"
+    if grep -qx '\[User\]' "$f"; then sed -i '/^\[User\]$/a SystemAccount=true' "$f"
+    else printf '[User]\nSystemAccount=true\n' >> "$f"; fi
+    chmod 0600 "$f"; restorecon -F "$f" 2>/dev/null || true
+    log "$f: SystemAccount=true added (GDM list: after a reboot)"
+  else
+    printf '[User]\nSystemAccount=true\n' | write_file "$f" 0600
+    log "GDM list: $a hidden after a reboot"
+  fi
+  if grep -qE "^auth[[:space:]]+requisite[[:space:]]+pam_succeed_if\.so[[:space:]]+user[[:space:]]+!=[[:space:]]+$a([[:space:]]|$)" "$pam" 2>/dev/null; then
+    log "$pam: $a refused"
+  elif [[ -f $pam ]]; then
+    backup "$pam"
+    sed -i "1i $line" "$pam"
+    restorecon -F "$pam" 2>/dev/null || true
+    log "$pam: line 1 refuses $a (GDM password login)"
+  else
+    warn "$pam missing (no GDM?) - GDM line skipped"
+  fi
+
+  # --- homes: owner only
+  for f in "$a" "$d"; do
+    chmod 0700 "$(user_home "$f")" && log "home of $f -> 0700"
+  done
+  [[ $(passwd -S root 2>/dev/null | awk '{print $2}') == L* ]] || warn "root password not locked"
+
+  # --- run 2: only from the admin (sudo from it works = safe to take the daily user's)
+  if [[ ${SUDO_USER:-} == "$a" && $as != P && $as != PS ]]; then
+    warn "run 2 needs the admin's password set first: daily user keeps wheel"; return 0
+  fi
+  if [[ ${SUDO_USER:-} != "$a" ]]; then
+    log "next: log in as $a on a text console (Ctrl+Alt+F3), sudo -v, then there:"
+    log "  sudo ADMIN_USER=$a DAILY_USER=$d ./harden-workstation.sh accounts"
+    log "  (takes wheel and ${MULLVAD_SOCKET_GROUP:-the Mullvad group} from $d)"
+    return 0
+  fi
+  for g in wheel ${MULLVAD_SOCKET_GROUP:+"$MULLVAD_SOCKET_GROUP"}; do
+    getent group "$g" >/dev/null || continue
+    if [[ $g != wheel ]] && ! id -nG "$a" | tr ' ' '\n' | grep -qx "$g"; then
+      usermod -aG "$g" "$a"; log "$a added to $g"
+    fi
+    if id -nG "$d" | tr ' ' '\n' | grep -qx "$g"; then
+      gpasswd -d "$d" "$g" >/dev/null; log "$d removed from $g"
+    fi
+  done
+  log "$d: log out (or reboot): running processes keep the old groups"
+  log "sectop: from $a: sudo ./install.sh --desktop-user $d; sudo gpasswd -d $d sectop"
+  log "check: sudo tools/check-accounts.sh $a $d   (0 FAIL)"
 }
 
 sec_services() {
@@ -725,13 +822,18 @@ sec_mullvad() {
     warn "mullvad-daemon.service not found - skipped"; return 0
   fi
   groupadd -r -f "$MULLVAD_SOCKET_GROUP"
-  if [[ -z $TARGET_USER ]]; then
-    warn "no TARGET_USER: add your user yourself: usermod -aG $MULLVAD_SOCKET_GROUP <user>"
-  elif id -nG "$TARGET_USER" | tr ' ' '\n' | grep -qxF "$MULLVAD_SOCKET_GROUP"; then
-    log "$TARGET_USER already in $MULLVAD_SOCKET_GROUP"
+  # socket = full daemon control: the admin when there is one (accounts section)
+  local who=${ADMIN_USER:-$TARGET_USER}
+  if [[ -n $ADMIN_USER ]] && ! id "$ADMIN_USER" >/dev/null 2>&1; then
+    warn "no admin $ADMIN_USER yet (accounts section): group left as it is"; who=""
+  fi
+  if [[ -z $who ]]; then
+    warn "no user: add the admin yourself: usermod -aG $MULLVAD_SOCKET_GROUP <user>"
+  elif id -nG "$who" | tr ' ' '\n' | grep -qxF "$MULLVAD_SOCKET_GROUP"; then
+    log "$who already in $MULLVAD_SOCKET_GROUP"
   else
-    usermod -aG "$MULLVAD_SOCKET_GROUP" "$TARGET_USER"
-    log "$TARGET_USER added to $MULLVAD_SOCKET_GROUP (log out and in, then mullvad works again)"
+    usermod -aG "$MULLVAD_SOCKET_GROUP" "$who"
+    log "$who added to $MULLVAD_SOCKET_GROUP (log out and in, then mullvad works again)"
   fi
   if [[ -f $dropin ]] && grep -qxF "$line" "$dropin"; then
     log "$dropin already set"; return 0
@@ -1045,6 +1147,7 @@ main() {
       sudo)        sec_sudo ;;
       pam)         sec_pam ;;
       su)          sec_su ;;
+      accounts)    sec_accounts ;;
       services)    sec_services ;;
       cron)        sec_cron ;;
       sshd)        sec_sshd ;;
