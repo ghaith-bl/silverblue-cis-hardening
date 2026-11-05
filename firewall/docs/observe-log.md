@@ -208,3 +208,17 @@ Counters reset every boot -> use `hostfw report` (reads kernel journal).
   skips split tunneling -> out_leak (rejected in enforce).
 - IN-NOISE this boot (`journalctl -k -b -g '^HFW-IN-NOISE'`, sender MAC + address): 359 from
   the TV (UDP 25860 broadcast, see Expected), 1 from a device with a random MAC.
+
+## 2026-11-05: out_split (split tunneling rejected in every mode)
+- Finding (as the daily user, account split): `/usr/bin/mullvad-exclude` is setuid root and
+  moves the caller's process into net_cls `/mullvad-exclusions`: anyone local, malware in
+  the daily account too, can ask Mullvad to route a program outside the tunnel.
+- Before: such flows were caught only as out_lan / out_leak, rejected only in enforce;
+  allowed in observe and through the uplink exceptions (DHCP, router ping, router-open,
+  lan_allow4). The 2026-11-01 flow left via the tunnel with the mark, UID=1000.
+- Change: rule out_split right after out_lo: ct mark 0xf41, or the relay mark on a
+  non-root socket, any interface but `if_vm` -> chain deny_out_split (count, log
+  `HFW-OUT-SPLIT`, reject). No `jump enforce`: no observe for it. sectop: crit.
+- Test (admin console): tunnel and VM flows unchanged; as the daily user
+  `mullvad-exclude curl -m 10 https://am.i.mullvad.net/connected` fails fast, out_split
+  grows, one `HFW-OUT-SPLIT` line with UID=1000.

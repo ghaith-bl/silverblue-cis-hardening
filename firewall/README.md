@@ -224,7 +224,8 @@ Setup, settings and how it fits hostfw: [../docs/mullvad.md](../docs/mullvad.md)
   mark (new Mullvad release) = OUT-LEAK with `MARK=` until `sync` with the tunnel up
 - dispatcher runs nft from the NM dispatcher SELinux domain -> after first reconnect:
   `sudo ausearch -m avc -ts recent | grep -i hostfw`
-- split tunneling (`mullvad-exclude`) is blocked by hostfw on purpose (out_leak)
+- split tunneling (`mullvad-exclude`, setuid root) is rejected by hostfw in every mode
+  (out_split, 2026-11-05); VM bridges keep the kvmlan marks
 - out_noscope: up to 5 s after a login the new GNOME Shell cgroup is not in the set yet;
   table reload empties the set until the watcher's next look (it is restarted)
 - L2 (ARP) not covered by `inet` table

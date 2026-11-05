@@ -15,6 +15,7 @@
 # Switched live by hostfw.sh. No reload.
 # noscope (GNOME Shell's shared cgroup) has its own switch, chain `enforce_noscope`:
 # `hostfw noscope observe | enforce`.
+# out_split (split tunneling) has no switch: rejected in every mode.
 #
 # Naming contract (sectop):
 #   log prefix  HFW-<DIR>-<NAME>:     DIR = OUT | IN | FWD
@@ -127,6 +128,7 @@ table inet hostfw {
 	counter in_lan           { comment "new inbound from uplink (firewalld drops)" }
 	counter in_vpn           { comment "new inbound from tunnel (firewalld drops)" }
 	counter out_noscope      { comment "new host flows from GNOME Shell's cgroup (app without its own scope)" }
+	counter out_split        { comment "split tunneling (ct mark 0xf41) not to a VM bridge: rejected in every mode" }
 
 	# ---------- mode switch ----------
 
@@ -197,6 +199,15 @@ table inet hostfw {
 		jump enforce_noscope
 	}
 
+	# split tunneling: mullvad-exclude is setuid root, any local user can start a program
+	# outside the tunnel (Mullvad marks it ct mark 0xf41 + mark 0x6d6f6c65). Not used
+	# here: no observe, own reject, no jump enforce. VM bridges keep their marks (kvmlan).
+	chain deny_out_split {
+		counter name "out_split"
+		limit rate 10/minute burst 20 packets log prefix "HFW-OUT-SPLIT: " level info flags skuid
+		reject with icmpx admin-prohibited
+	}
+
 	# ---------- allow + log (rare, worth seeing) ----------
 
 	chain allow_out_router_admin {
@@ -256,6 +267,13 @@ table inet hostfw {
 		ct state established,related accept comment "out_est"
 		oifname "lo" accept comment "out_lo"
 
+		# split tunneling (mullvad-exclude): never, any interface but the VM bridges.
+		# Second rule: the mark on a non-root socket (test 2026-11-01: UID=1000 with
+		# MARK=0x6d6f6c65); setting a mark needs CAP_NET_ADMIN, the daemon is uid 0 and
+		# kernel WireGuard has no socket (skuid does not match there).
+		ct mark 0x00000f41 oifname != @if_vm goto deny_out_split comment "out_split"
+		meta mark @wg_fwmark meta skuid != 0 oifname != @if_vm goto deny_out_split comment "out_split"
+
 		# new flows from GNOME Shell's cgroup: count + log, reject in its own enforce mode
 		socket cgroupv2 level 5 @noscope_cg jump deny_out_noscope comment "out_noscope"
 
@@ -272,8 +290,7 @@ table inet hostfw {
 		oifname @if_trusted accept comment "out_trusted"
 
 		# uplink: tunnel transport + VPN API + router only.
-		# Split tunneling (mullvad-exclude) marks its traffic with the same mark plus
-		# ct mark 0xf41: not accepted here -> out_lan / out_leak.
+		# Split tunneling (ct mark 0xf41) never gets here: out_split above.
 		meta mark @wg_fwmark ct mark != 0x00000f41 counter name "out_wg" accept comment "out_wg"
 		# Mullvad API while not connected: no mark, uid 0 (inet mullvad allows the same:
 		# ip daddr <API address> tcp dport 443 meta skuid 0, host 2026-10-26)

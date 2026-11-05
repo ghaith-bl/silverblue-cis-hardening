@@ -42,29 +42,49 @@ rate limit   10/min burst 20 per rule (noise: 6/min burst 10) -> counters are ex
 |---|---|---|---|---|
 | 1 | out_est | ct established,related | accept | - |
 | 2 | out_lo | oif lo | accept | - |
-| 3 | out_noscope | GNOME Shell cgroup (set noscope_cg), not established | count + log, own switch `enforce_noscope` | HFW-OUT-NOSCOPE |
-| 4 | out_dns_vpn | tcp/udp 53,853 -> vpn_dns4 via wg0-mullvad | accept, counted | - |
-| 5 | out_dns_vm | tcp/udp 53,853 via virbr0 | accept | - |
-| 6 | out_dns | any other tcp/udp 53,853 | deny | HFW-OUT-DNS |
-| 7 | out_disco | udp 137,138,1900,3702,5351,5353,5355,27036 / tcp 5355,5357,5358,27036,27037 | deny | HFW-OUT-DISCO |
-| 8 | out_share | tcp 21,111,139,445,548,2049 / udp 69,111,2049, not via virbr0 | deny | HFW-OUT-SHARE |
-| 9 | out_new | oif in if_vpn, ct new | accept + log | HFW-OUT-NEW |
-| 10 | out_trusted | oif in if_trusted | accept | - |
-| 11 | out_wg | meta mark in wg_fwmark, ct mark not 0xf41 | accept, counted | - |
-| 12 | out_vpn_api | uid 0 tcp 443 -> vpn_api4 | accept, counted | - |
-| 13 | out_dhcp4 | udp 68 -> 67 | accept | - |
-| 14 | out_router_icmp | icmp echo-request -> router4 | accept | - |
-| 15 | out_router_admin | ip . tcp port in router_admin4 | accept + log | HFW-OUT-ROUTER-ADMIN |
-| 16 | out_lan_allow | ip . proto . port in lan_allow4 | accept + log | HFW-OUT-LAN-ALLOW |
-| 17 | out_ndp6 | icmpv6 RS, NS, NA, MLDv2 report | accept | - |
-| 18 | out_lan | daddr private / link-local / CGNAT / multicast / broadcast | deny | HFW-OUT-LAN |
-| 19 | out_leak | anything else on uplink | deny | HFW-OUT-LEAK |
+| 3 | out_split | ct mark 0xf41, or mark in wg_fwmark from a non-root socket; oif not in if_vm | count + log + reject, every mode | HFW-OUT-SPLIT |
+| 4 | out_noscope | GNOME Shell cgroup (set noscope_cg), not established | count + log, own switch `enforce_noscope` | HFW-OUT-NOSCOPE |
+| 5 | out_dns_vpn | tcp/udp 53,853 -> vpn_dns4 via wg0-mullvad | accept, counted | - |
+| 6 | out_dns_vm | tcp/udp 53,853 via virbr0 | accept | - |
+| 7 | out_dns | any other tcp/udp 53,853 | deny | HFW-OUT-DNS |
+| 8 | out_disco | udp 137,138,1900,3702,5351,5353,5355,27036 / tcp 5355,5357,5358,27036,27037 | deny | HFW-OUT-DISCO |
+| 9 | out_share | tcp 21,111,139,445,548,2049 / udp 69,111,2049, not via virbr0 | deny | HFW-OUT-SHARE |
+| 10 | out_new | oif in if_vpn, ct new | accept + log | HFW-OUT-NEW |
+| 11 | out_trusted | oif in if_trusted | accept | - |
+| 12 | out_wg | meta mark in wg_fwmark, ct mark not 0xf41 | accept, counted | - |
+| 13 | out_vpn_api | uid 0 tcp 443 -> vpn_api4 | accept, counted | - |
+| 14 | out_dhcp4 | udp 68 -> 67 | accept | - |
+| 15 | out_router_icmp | icmp echo-request -> router4 | accept | - |
+| 16 | out_router_admin | ip . tcp port in router_admin4 | accept + log | HFW-OUT-ROUTER-ADMIN |
+| 17 | out_lan_allow | ip . proto . port in lan_allow4 | accept + log | HFW-OUT-LAN-ALLOW |
+| 18 | out_ndp6 | icmpv6 RS, NS, NA, MLDv2 report | accept | - |
+| 19 | out_lan | daddr private / link-local / CGNAT / multicast / broadcast | deny | HFW-OUT-LAN |
+| 20 | out_leak | anything else on uplink | deny | HFW-OUT-LEAK |
 
 `out_wg`: the Mullvad daemon sets mark 0x6d6f6c65 on the relay transport (setting a
 mark needs CAP_NET_ADMIN). Its API calls outside the tunnel have no mark: `out_vpn_api`
-allows them the way `inet mullvad` does (uid 0, tcp 443, one address), nothing else. Split tunneling
-(`mullvad-exclude`) sets the same mark plus ct mark 0xf41 -> not accepted here, ends in
-out_lan / out_leak (not used on this host; test 2026-11-01: observe-log.md).
+allows them the way `inet mullvad` does (uid 0, tcp 443, one address), nothing else.
+
+`out_split` (2026-11-05): split tunneling (`mullvad-exclude`, or `mullvad split-tunnel
+add <pid>`) sets ct mark 0xf41 + mark 0x6d6f6c65, Mullvad then routes the program
+outside the tunnel. `/usr/bin/mullvad-exclude` is setuid root: any local user, malware
+in the daily account too, can start a program there (checked as the daily user
+2026-11-05: the process lands in net_cls `/mullvad-exclusions`). Before: such traffic
+ended in out_lan / out_leak, rejected only in enforce mode, allowed in observe and by
+the uplink exceptions (DHCP, router ping, router-open, lan_allow4); test 2026-11-01:
+observe-log.md.
+- own deny chain, `reject` in it, no `jump enforce`: blocked in observe too, no switch
+  (split tunneling is not used on this host)
+- any interface but `if_vm`: kvmlan puts the same marks on host <-> VM packets
+  (virbr0), those stay allowed. Replies to VM flows are `established` (rule 1)
+- two matches, one chain: ct mark 0xf41 (Mullvad's documented split mark) and the
+  relay mark on a socket that is not uid 0 (test 2026-11-01: `UID=1000 MARK=0x6d6f6c65`,
+  OUT=wg0-mullvad). A mark needs CAP_NET_ADMIN: the daemon (uid 0) sets it on the relay
+  transport; kernel WireGuard sends without a socket, `skuid` never matches there
+- every interface, the tunnel too: the 2026-11-01 flow left via wg0-mullvad
+- placed before the DNS rules: an excluded program's own DNS is caught here too
+- not used: `meta cgroup <classid>` (Mullvad's net_cls id is an internal value; the ct
+  mark is the documented one)
 
 ## forward
 
