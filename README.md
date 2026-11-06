@@ -117,7 +117,7 @@ sudo ./harden-workstation.sh kargs    # then reboot: LUKS unlock, Wi-Fi, VPN, a 
 | `sudo`        | `use_pty`, `/var/log/sudo.log`, 5 min timeout | password asked again after 5 min |
 | `pam`         | faillock (5 tries -> 15 min), pwhistory (24), pwquality (14 chars, 4 classes), no empty passwords | lockout includes lock screen |
 | `su`          | `su` limited to empty group `sugroup` | use `sudo` |
-| `accounts`    | CIS Controls v8 5.4: admin `ADMIN_USER` (wheel, own group, AccountsService `SystemAccount=true`, `auth requisite pam_succeed_if.so user != <admin>` as line 1 of `/etc/pam.d/gdm-password`), homes 0700. Run 2 only from the admin (its sudo = proof it works; root is locked): daily user out of `wheel` and `MULLVAD_SOCKET_GROUP`, admin in it | admin: text console only, not in the GDM list, GDM refuses it; daily user: no sudo, no Mullvad CLI; `mullvad` / `rpm-ostree` / `virsh` from the admin |
+| `accounts`    | CIS Controls v8 5.4: admin `ADMIN_USER` (wheel, own group, AccountsService `SystemAccount=true`, `auth requisite pam_succeed_if.so user != <admin>` as line 1 of `/etc/pam.d/gdm-password`), homes 0700. Run 2 only from the admin (its sudo = proof it works; root is locked): daily user out of `wheel`, `MULLVAD_SOCKET_GROUP` and `sectop`, admin in the Mullvad group | admin: text console only, not in the GDM list, GDM refuses it; daily user: no sudo, no Mullvad CLI; `mullvad` / `rpm-ostree` / `virsh` from the admin |
 | `services`    | mask rpcbind / nfs / avahi, disable+mask nftables.service (not stopped live) | no mDNS |
 | `cron`        | root-only cron dirs, `cron.allow` / `at.allow` | only root + your user can use crontab |
 | `sshd`        | hardened drop-in `40-cis.conf`, server masked | no incoming SSH |
@@ -208,7 +208,8 @@ cd ~/my-project/silverblue-cis-hardening && tools/admin-run.sh step.sh
   root locked, GDM list + PAM line, homes 0700, sectop sysusers + units, Mullvad lockdown),
   copy in `/tmp/check-accounts.*`. Exit 0 = no FAIL
 - sectop: `sudo ./install.sh --desktop-user <daily>` from the admin (UI as the admin,
-  user helper for the daily user), `sudo gpasswd -d <daily> sectop`
+  user helper for the daily user). Run 2 of `accounts` takes group sectop from the
+  daily user (sysusers never removes a member)
 
 ## Planned
 

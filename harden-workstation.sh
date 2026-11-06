@@ -364,7 +364,7 @@ sec_su() {
 ## (hidden from GDM, GDM login refused). DAILY_USER: GNOME, browsers, no sudo.
 ## Run 1 (any sudo user): admin account + GDM + homes. Its password is set by hand on a
 ## text console. Run 2 from the admin itself (its sudo is the proof it works): the daily
-## user leaves wheel and the Mullvad group. Never the other way: root is locked, a daily
+## user leaves wheel, the Mullvad group and sectop's reader group. Never the other way: root is locked, a daily
 ## user out of wheel before the admin's sudo works = no sudo left.
 sec_accounts() {
   local a=$ADMIN_USER d=$DAILY_USER as f pam=/etc/pam.d/gdm-password g
@@ -428,7 +428,7 @@ sec_accounts() {
   if [[ ${SUDO_USER:-} != "$a" ]]; then
     log "next: log in as $a on a text console (Ctrl+Alt+F3), sudo -v, then there:"
     log "  sudo ADMIN_USER=$a DAILY_USER=$d ./harden-workstation.sh accounts"
-    log "  (takes wheel and ${MULLVAD_SOCKET_GROUP:-the Mullvad group} from $d)"
+    log "  (takes wheel, ${MULLVAD_SOCKET_GROUP:-the Mullvad group} and sectop from $d)"
     return 0
   fi
   for g in wheel ${MULLVAD_SOCKET_GROUP:+"$MULLVAD_SOCKET_GROUP"}; do
@@ -440,8 +440,13 @@ sec_accounts() {
       gpasswd -d "$d" "$g" >/dev/null; log "$d removed from $g"
     fi
   done
+  # sectop's reader group: the daily user runs only the user helper (install.sh warns,
+  # sysusers never removes a member). Found 2026-11-06: still a member after the split
+  if getent group sectop >/dev/null && in_group "$d" sectop; then
+    gpasswd -d "$d" sectop >/dev/null; log "$d removed from sectop"
+  fi
   log "$d: log out (or reboot): running processes keep the old groups"
-  log "sectop: from $a: sudo ./install.sh --desktop-user $d; sudo gpasswd -d $d sectop"
+  log "sectop: from $a: sudo ./install.sh --desktop-user $d"
   log "check: sudo tools/check-accounts.sh $a $d   (0 FAIL)"
 }
 
