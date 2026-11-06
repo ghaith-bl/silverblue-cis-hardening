@@ -46,7 +46,7 @@ echo "-- drop zone rich rules now (runtime):"
 firewall-cmd --zone="$ZONE" --list-rich-rules || true
 echo
 echo "-- virbr0 zone: $(firewall-cmd --get-zone-of-interface=virbr0 2>/dev/null || echo none)"
-if firewall-cmd --permanent --get-zones | tr ' ' '\n' | grep -qx kvm-hardened; then
+if firewall-cmd --permanent --get-zones | tr ' ' '\n' | grep -x kvm-hardened >/dev/null; then
     echo "-- kvm-hardened (permanent, not bound to virbr0 - review):"
     firewall-cmd --permanent --info-zone=kvm-hardened
 fi

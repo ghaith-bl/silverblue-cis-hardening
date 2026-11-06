@@ -48,7 +48,7 @@ ruleset_path() {
 
 live_mode() {
     table_loaded || { echo off; return; }
-    if "$NFT" list chain $T enforce | grep -qE '^[[:space:]]+reject'; then
+    if "$NFT" list chain $T enforce | grep -E '^[[:space:]]+reject' >/dev/null; then
         echo enforce
     else
         echo observe

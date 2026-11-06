@@ -97,6 +97,14 @@
 - With a random MAC, `/sys/class/net/*/address` is not the real one any more: the hardware
   MAC is `permaddr` in `ip link` (tools/check-private-info.sh reads both).
 
+## Bash
+
+- `set -o pipefail` + `cmd | grep -q x` fails at random: grep -q exits at the first
+  match, `cmd` gets SIGPIPE on its next write (exit 141), the pipe reports failure
+  although the line was there. Seen 2026-11-05 in a host script (`2-hostfw-split.sh`).
+  Use `cmd | grep x >/dev/null` (grep reads to the end) or test in the shell
+  (`[[ " $(id -nG u) " == *" g "* ]]`). Same for `| head` when the status matters.
+
 ## sysctl
 
 - Removing a file from `/etc/sysctl.d/` does not revert values until reboot.

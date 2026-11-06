@@ -42,7 +42,9 @@ members() { # $1 group: its member list, sorted, comma separated
   getent group "$1" | cut -d: -f4 | tr ',' '\n' | sed '/^$/d' | sort | paste -sd, -
 }
 
-in_group() { id -nG "$1" | tr ' ' '\n' | grep -qx "$2"; }
+# no 'cmd | grep -q' under pipefail: grep -q quits at the first match, the writer can get
+# SIGPIPE and the pipe fails although the line was there (docs/lessons-learned.md)
+in_group() { [[ " $(id -nG "$1" 2>/dev/null) " == *" $2 "* ]]; }
 
 stale() {  # $1 uid, $2 gid: running processes of uid that still hold gid
   awk -v u="$1" -v g="$2" '
@@ -92,12 +94,12 @@ main() {
   done
 
   # --- sudo policy
-  if sudo -n -l -U "$DAILY" 2>&1 | grep -q 'is not allowed to run sudo'; then
+  if sudo -n -l -U "$DAILY" 2>&1 | grep 'is not allowed to run sudo' >/dev/null; then
     out PASS "sudo: daily" "not allowed"
   else
     out FAIL "sudo: daily" "allowed | want: not allowed"
   fi
-  if sudo -n -l -U "$ADMIN" 2>&1 | grep -q '(ALL) ALL'; then
+  if sudo -n -l -U "$ADMIN" 2>&1 | grep -F '(ALL) ALL' >/dev/null; then
     out PASS "sudo: admin" "(ALL) ALL"
   else
     out FAIL "sudo: admin" "no (ALL) ALL rule: fix before anything else"
@@ -136,7 +138,7 @@ main() {
 
   # --- VPN still enforced after moving the mullvad group
   if command -v mullvad >/dev/null; then
-    if mullvad lockdown-mode get 2>/dev/null | grep -qiE '(:|[[:space:]])on$'; then
+    if mullvad lockdown-mode get 2>/dev/null | grep -iE '(:|[[:space:]])on$' >/dev/null; then
       out PASS "mullvad lockdown" "on"
     else
       out FAIL "mullvad lockdown" "not on"

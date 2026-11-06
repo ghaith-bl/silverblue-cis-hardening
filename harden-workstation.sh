@@ -105,7 +105,10 @@ set_kv() {
   restorecon -F "$file" 2>/dev/null || true
 }
 
-unit_exists() { systemctl list-unit-files --no-legend "$1" 2>/dev/null | grep -q .; }
+unit_exists() { systemctl list-unit-files --no-legend "$1" 2>/dev/null | grep . >/dev/null; }
+# no 'cmd | grep -q' under pipefail: grep -q quits at the first match, the writer can get
+# SIGPIPE and the pipe fails although the line was there (docs/lessons-learned.md)
+in_group() { [[ " $(id -nG "$1" 2>/dev/null) " == *" $2 "* ]]; }
 
 mask_units() {
   local u
@@ -300,7 +303,7 @@ sec_pam() {
     return 0
   fi
   profile=$(authselect current --raw | awk '{print $1}')
-  if authselect current --raw | grep -qw with-fingerprint; then
+  if authselect current --raw | grep -w with-fingerprint >/dev/null; then
     if [[ $FINGERPRINT == disable ]]; then
       authselect disable-feature with-fingerprint >/dev/null && log "authselect: disabled with-fingerprint"
     else
@@ -308,7 +311,7 @@ sec_pam() {
     fi
   fi
   for feat in with-faillock with-pwhistory without-nullok; do
-    if authselect list-features "$profile" | grep -qx "$feat"; then
+    if authselect list-features "$profile" | grep -x "$feat" >/dev/null; then
       authselect enable-feature "$feat" >/dev/null && log "authselect: enabled $feat"
     else
       warn "authselect profile '$profile' has no feature '$feat'"
@@ -375,7 +378,7 @@ sec_accounts() {
 
   # --- admin account: wheel, own group, bash
   if id "$a" >/dev/null 2>&1; then
-    id -nG "$a" | tr ' ' '\n' | grep -qx wheel || { usermod -aG wheel "$a"; log "$a added to wheel"; }
+    in_group "$a" wheel || { usermod -aG wheel "$a"; log "$a added to wheel"; }
     log "admin $a: $(id "$a")"
   else
     useradd -m -U -G wheel -s /bin/bash -c "admin (text console)" "$a"
@@ -430,10 +433,10 @@ sec_accounts() {
   fi
   for g in wheel ${MULLVAD_SOCKET_GROUP:+"$MULLVAD_SOCKET_GROUP"}; do
     getent group "$g" >/dev/null || continue
-    if [[ $g != wheel ]] && ! id -nG "$a" | tr ' ' '\n' | grep -qx "$g"; then
+    if [[ $g != wheel ]] && ! in_group "$a" "$g"; then
       usermod -aG "$g" "$a"; log "$a added to $g"
     fi
-    if id -nG "$d" | tr ' ' '\n' | grep -qx "$g"; then
+    if in_group "$d" "$g"; then
       gpasswd -d "$d" "$g" >/dev/null; log "$d removed from $g"
     fi
   done
@@ -829,7 +832,7 @@ sec_mullvad() {
   fi
   if [[ -z $who ]]; then
     warn "no user: add the admin yourself: usermod -aG $MULLVAD_SOCKET_GROUP <user>"
-  elif id -nG "$who" | tr ' ' '\n' | grep -qxF "$MULLVAD_SOCKET_GROUP"; then
+  elif in_group "$who" "$MULLVAD_SOCKET_GROUP"; then
     log "$who already in $MULLVAD_SOCKET_GROUP"
   else
     usermod -aG "$MULLVAD_SOCKET_GROUP" "$who"
