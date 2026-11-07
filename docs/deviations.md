@@ -163,4 +163,11 @@ Input for an OpenSCAP tailoring file.
 - Source of the kargs ideas: secureblue default kargs (compared 2026-10-30), minus what
   the Fedora kernel config already does. Not taken: `ia32_emulation=0` (Steam),
   `nosmt` (half the cores), `vsyscall=none` (kernel already xonly), `module.sig_enforce`
-  (lockdown integrity). Later, measured first: `iommu.strict=1`, `init_on_free=1`.
+  (lockdown integrity).
+- `init_on_free=1 iommu.strict=1` (kargs, 2026-11-07, after a trial from 2026-11-03):
+  freed pages zeroed at once; IOTLB flushed on every DMA unmap (no lazy window).
+  Kernel docs: init_on_free costs 3-5 % typical, up to 8 %. Measured with
+  tools/kargs-bench.sh (before / after / end): boot 41.1 / 37.8 / 39.0 s, memory free
+  0.78 / 0.68 / 0.66 s, small files 0.17 / 0.18 / 0.17 s, podman run 0.28 / 0.36 /
+  0.35 s, O_DIRECT 2 GiB read noisy (1.0 - 3.3 s), IOMMU faults 0, no felt slowdown in
+  4 days (desktop, Steam on the iGPU). Undo: `rpm-ostree kargs --delete=...`, reboot.

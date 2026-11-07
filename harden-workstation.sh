@@ -40,7 +40,8 @@ IDLE_LOCK_SECONDS=900        # screen locks after 15 minutes idle
 MAC_MODE="random"            # "random" = new MAC on every connect (Wi-Fi + cable)
                              # "stable-ssid" = same random MAC per Wi-Fi network (Fedora default)
 GENERIC_HOSTNAME="localhost" # hostname every network may see; "" = keep the current one
-KERNEL_ARGS=(initcall_blacklist=af_alg_init page_alloc.shuffle=1 rd.shell=0 rd.emergency=halt)
+KERNEL_ARGS=(initcall_blacklist=af_alg_init page_alloc.shuffle=1 rd.shell=0 rd.emergency=halt
+             init_on_free=1 iommu.strict=1)
                              # kargs section; () = add none
 MULLVAD_SOCKET_GROUP="mullvad"  # mullvad section: only this group may use the Mullvad CLI / GUI
                              # "" = any local user (Mullvad's default)
@@ -1117,6 +1118,12 @@ EOF
 #   after the LUKS unlock. Only worth it with a GRUB password (grub2-setpassword, by
 #   hand): without one anyone at the menu removes these args. Rollback still works:
 #   boot entries stay unrestricted, only edit / command line / firmware entry ask.
+#   init_on_free=1: freed memory is zeroed at once (a use-after-free or an uninitialized
+#   read finds zeros, not old data). Fedora sets init_on_alloc only.
+#   iommu.strict=1: a device loses DMA access to a buffer as soon as the driver unmaps
+#   it (the default lazy mode batches the IOTLB flush: a short window).
+#   Both after a 4-day trial (2026-11-03 to 2026-11-07, tools/kargs-bench.sh): no felt
+#   slowdown (desktop, Steam), podman start +0.08 s, IOMMU faults 0.
 #   Idea source: secureblue default kargs, minus what the Fedora kernel config already
 #   does (init_on_alloc, slab_nomerge, randomize_kstack_offset).
 sec_kargs() {

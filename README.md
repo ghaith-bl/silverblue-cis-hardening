@@ -77,7 +77,7 @@ sudo ./harden-workstation.sh all
 | `APP_UNITS`            | `(brave-browser)` | desktop ids the `appunit` section starts as their own service; `()` = none |
 | `ADMIN_USER`           | `""` (env) | `accounts`: CLI-only admin (wheel, text console, hidden from GDM); `""` = one account. Given on the command line: `sudo ADMIN_USER=<admin> DAILY_USER=<daily> ./harden-workstation.sh ...` (names stay out of git) |
 | `DAILY_USER`           | `""` (env) | `accounts`: GNOME daily user, no sudo; also the user of the desktop steps (cron.allow, shell rc, mic, appunit). Two accounts: give it to every run from the admin |
-| `KERNEL_ARGS`          | `(initcall_blacklist=af_alg_init page_alloc.shuffle=1 rd.shell=0 rd.emergency=halt)` | kernel args of the `kargs` section; `()` = none |
+| `KERNEL_ARGS`          | `(initcall_blacklist=af_alg_init page_alloc.shuffle=1 rd.shell=0 rd.emergency=halt init_on_free=1 iommu.strict=1)` | kernel args of the `kargs` section; `()` = none |
 
 ### Recommended order (low -> high risk)
 
@@ -131,7 +131,7 @@ sudo ./harden-workstation.sh kargs    # then reboot: LUKS unlock, Wi-Fi, VPN, a 
 | `usbguard`    | not CIS: USBGuard rules from the devices present (only while rules.conf is empty; Bluetooth adapter blocked), usbguard CLI root only, `usb-allow-storage` in `/usr/local/sbin`, GNOME usb-protection off (locked), usbguard-dbus masked. Run twice: start + test, then enable | only devices in rules.conf work (locked or not, before login too); flash drive: `sudo usb-allow-storage` (storage-only devices, until unplugged); no Bluetooth; `usbguard` needs sudo |
 | `appunit`     | not CIS: `app-unit` in `/usr/local/bin`; for each id in `APP_UNITS` a copy of its desktop file in `/usr/local/share/applications` whose Exec runs `app-unit <id> ...`: systemd starts the app as `app-<id>@<pid>.service`. Fixes Brave (launcher forks before GNOME moves it) running inside `org.gnome.Shell@user.service` | the app in its own unit (sectop, `systemd-cgls`); its output in `journalctl --user`; after a Brave update run the section again |
 | `time`        | chrony: NTS only (Netnod + PTB), `authselectmode require`, `minsources 2`, no pool, no NTP servers from DHCP | no time sync without the tunnel (RTC keeps time) |
-| `kargs`       | not CIS: kernel args from `KERNEL_ARGS` via `rpm-ostree kargs` (next boot). `initcall_blacklist=af_alg_init`: AF_ALG (kernel crypto API from user space) off; `page_alloc.shuffle=1`: random page allocator; `rd.shell=0 rd.emergency=halt`: no initramfs root shell | `socket(AF_ALG)` fails; no Adiantum / Serpent / Twofish LUKS, BlueZ mesh, iwd; boot failure halts (fix: previous GRUB entry, or `e` + GRUB password) |
+| `kargs`       | not CIS: kernel args from `KERNEL_ARGS` via `rpm-ostree kargs` (next boot). `initcall_blacklist=af_alg_init`: AF_ALG (kernel crypto API from user space) off; `page_alloc.shuffle=1`: random page allocator; `rd.shell=0 rd.emergency=halt`: no initramfs root shell; `init_on_free=1`: freed memory zeroed; `iommu.strict=1`: DMA unmapped at once | `socket(AF_ALG)` fails; no Adiantum / Serpent / Twofish LUKS, BlueZ mesh, iwd; boot failure halts (fix: previous GRUB entry, or `e` + GRUB password) |
 
 ## Rollback
 
@@ -162,6 +162,7 @@ sudo hostfw noscope observe                      # out_noscope: log only again
 sudo cp /var/backups/hardening/<time>/etc/chrony.conf /etc/ && sudo systemctl restart chronyd
 sudo rpm-ostree kargs --delete=initcall_blacklist=af_alg_init   # then reboot
 sudo rpm-ostree kargs --delete=page_alloc.shuffle=1 --delete=rd.shell=0 --delete=rd.emergency=halt
+sudo rpm-ostree kargs --delete=init_on_free=1 --delete=iommu.strict=1
 sudo rm /boot/grub2/user.cfg                     # GRUB password off
 sudo rm /etc/audit/rules.d/99-finalize.rules     # audit lock off, then reboot
 sudo rpm-ostree rollback                         # after booting the previous GRUB entry
