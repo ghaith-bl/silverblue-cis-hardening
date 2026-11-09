@@ -239,9 +239,11 @@ cd ~/my-project/silverblue-cis-hardening && tools/admin-run.sh step.sh
 
 ## Checks (CI)
 
-Every push (.github/workflows/check.yml): `bash -n`, ShellCheck (warnings), Python syntax
-(firewall/hostfw-noscope.py), private-info check of the working tree
-(tools/check-private-info.sh --tree).
+Every push (.github/workflows/check.yml): ASCII-only files, `bash -n` (browsers/brave and
+browsers/firefox too), ShellCheck (warnings), Python syntax (firewall/hostfw-noscope.py),
+private-info check of the working tree (tools/check-private-info.sh --tree).
+Git history: reviewed by hand 2026-11-01 (full run): public VPN / DNS addresses, LAN and
+libvirt addresses, interface names, Mullvad's public signing key uid. Kept on purpose.
 
 ## Kernel arg trials
 
@@ -250,8 +252,6 @@ reboot, then `tools/kargs-bench.sh after`: the same numbers both times (memory f
 small files, O_DIRECT disk read, podman start, optional VM boot to ssh, kernel warnings,
 IOMMU faults) in `~/kargs-bench/`. A trial arg goes into `KERNEL_ARGS` only after it is
 kept.
-History: reviewed by hand 2026-11-01 (full run): public VPN / DNS addresses, LAN and
-libvirt addresses, interface names, Mullvad's public signing key uid. Kept on purpose.
 
 ## Credits
 

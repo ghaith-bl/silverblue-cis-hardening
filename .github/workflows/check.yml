@@ -16,9 +16,14 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: ASCII only
+        run: |
+          ! grep -rnIP '[^\x00-\x7F]' --exclude-dir=.git .
+
       - name: bash syntax
         run: |
-          for f in harden-workstation.sh tools/*.sh usbguard/*.sh appunit/*.sh firewall/*.sh browsers/*.sh; do
+          for f in harden-workstation.sh tools/*.sh usbguard/*.sh appunit/*.sh firewall/*.sh browsers/*.sh \
+                   browsers/brave/*.sh browsers/firefox/*.sh; do
             bash -n "$f"
           done
           sh -n firewall/nm-dispatcher/90-hostfw-sync
