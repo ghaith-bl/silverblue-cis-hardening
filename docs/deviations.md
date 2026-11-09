@@ -59,7 +59,7 @@ Input for an OpenSCAP tailoring file.
 | `sysctl_kernel_yama_ptrace_scope`, `sysctl_fs_suid_dumpable` | conflicting defaults in `/usr/lib/sysctl.d/` (`10-default-yama-scope.conf` sets `0`); ours loads last | `sysctl kernel.yama.ptrace_scope fs.suid_dumpable` -> `2`, `0` |
 | `file_groupownership_sshd_private_key` | Fedora uses group `ssh_keys` by design | - |
 | `sshd_*` | sshd is masked; hardened drop-in present | `systemctl is-enabled sshd` -> `masked` |
-| ~17 `audit_rules_*` | rules loaded, different text format than the scanner regex | `sudo auditctl -l`, `ausearch -k <key>` |
+| 16 `audit_rules_*` (execution, mac / networkconfig modification, privileged commands, suid_auid, sysadmin, pam.d) | rules loaded, different text format than the scanner regex | `sudo auditctl -l`, `ausearch -k <key>` |
 
 ## Mullvad VPN (replaced Proton VPN 2026-10-26, docs/mullvad.md)
 - mullvad-daemon runs as root (owns its nftables table, routes, DNS). Package unit,
