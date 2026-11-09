@@ -75,6 +75,8 @@ sudo ./harden-workstation.sh all
 | `ENABLE_NOISY_AUDIT`   | `no`       | DAC / delete / failed-open audit rules (very noisy with Steam / Brave) |
 | `MAKE_AUDIT_IMMUTABLE` | `yes`      | `-e 2`: audit rules locked until reboot |
 | `IDLE_LOCK_SECONDS`    | `900`      | GNOME idle lock |
+| `PASS_MAX_DAYS`        | `365`      | `pwage`: password max age, new and existing accounts |
+| `PASS_WARN_AGE`        | `14`       | `pwage`: warning days before it expires |
 | `MAC_MODE`             | `random`   | `random` = new MAC on every connect, `stable-ssid` = one per Wi-Fi network |
 | `GENERIC_HOSTNAME`     | `localhost`| hostname a network sees; `""` = keep mine |
 | `MULLVAD_SOCKET_GROUP` | `mullvad`  | group for the Mullvad CLI / GUI; `""` = any local user (Mullvad's default) |
@@ -96,6 +98,7 @@ systemctl reboot                      # test VPN, VMs, podman, a game
 sudo ./harden-workstation.sh sudo     # then: sudo -k && sudo true
 sudo ./harden-workstation.sh gnome su # then: su - (must fail), sudo true
 sudo ./harden-workstation.sh pam      # with a root shell open
+sudo ./harden-workstation.sh pwage    # skips an account whose password is older than the max
 sudo ADMIN_USER=<admin> DAILY_USER=<daily> ./harden-workstation.sh accounts
                                       # run 1, then the admin password on a text console
                                       # (Ctrl+Alt+F3, sudo passwd <admin>, never in GNOME);
@@ -123,6 +126,7 @@ sudo ./harden-workstation.sh kargs    # reboot: LUKS unlock, Wi-Fi, VPN, a VM
 | `gnome`       | no automount / autorun, 15 min idle lock, no login user list (dconf `gdm` + `distro`, all locked) | type the user name at login |
 | `sudo`        | `use_pty`, `/var/log/sudo.log`, 5 min timeout | password asked again after 5 min |
 | `pam`         | faillock (5 tries -> 15 min), pwhistory (24), pwquality (14 chars, 4 classes), no empty passwords | lockout includes the lock screen |
+| `pwage`       | password max age `PASS_MAX_DAYS`, warning `PASS_WARN_AGE` (login.defs + every login account); no lock after expiry, no min age | change the password once a year |
 | `su`          | `su` limited to the empty group `sugroup` | use `sudo` |
 | `accounts`    | CIS Controls v8 5.4: admin in wheel, hidden from and refused by GDM; daily user out of wheel, `mullvad`, `sectop`; homes 0700. Run 2 only from the admin | admin: text console only; daily user: no sudo, no Mullvad CLI |
 | `services`    | mask rpcbind / nfs / avahi, nftables.service | no mDNS |

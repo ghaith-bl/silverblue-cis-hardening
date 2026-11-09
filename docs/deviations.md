@@ -31,8 +31,8 @@ Input for an OpenSCAP tailoring file.
 
 | Rule | Decision | Reason |
 |------|----------|--------|
-| `accounts_maximum_age_login_defs` (`PASS_MAX_DAYS` <= 365), `accounts_password_set_max_life_existing` | admin and daily user: no expiry (`chage -M 99999`) | NIST SP 800-63B (memorized secrets): no forced periodic change, change on compromise; CIS Password Policy Guide (2023) agrees for long passwords. A forced change pushes to weaker or written-down admin passwords. Change it when there is any sign of compromise |
-| `account_disable_post_pw_expiration` | skip | with no expiry it never triggers; root locked, the admin is the only sudo account |
+| `accounts_maximum_age_login_defs`, `accounts_password_set_max_life_existing` | applied: 365 days, warning 14 (`pwage`) | I change both passwords about every six months anyway; the max only catches a forgotten change. NIST SP 800-63B still holds: change at once on any sign of compromise |
+| `account_disable_post_pw_expiration` | skip | locks an account some days after its password expired: root is locked and the admin is the only sudo account, so an expired admin would mean no sudo at all (recovery from a live USB) |
 | admin password | memorized + offline copy (paper / phone password manager), never in storage the daily user opens, never typed in GNOME | a keylogger or a password manager in the daily session must not get it |
 
 ## Changed on purpose

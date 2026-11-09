@@ -37,6 +37,8 @@ FINGERPRINT="disable"        # "keep" if you use a fingerprint reader ("disable"
 MIC_DISABLE="internal"       # "internal" = laptop mic + 3.5mm jack mic off (USB/Bluetooth mics still work)
                              # "all" = every mic off | "no" = leave microphones alone
 IDLE_LOCK_SECONDS=900        # screen locks after 15 minutes idle
+PASS_MAX_DAYS=365            # pwage section: password max age (days) for new and existing accounts
+PASS_WARN_AGE=14             # pwage section: warning this many days before
 MAC_MODE="random"            # "random" = new MAC on every connect (Wi-Fi + cable)
                              # "stable-ssid" = same random MAC per Wi-Fi network (Fedora default)
 GENERIC_HOSTNAME="localhost" # hostname every network may see; "" = keep the current one
@@ -65,7 +67,7 @@ else
 fi
 
 BACKUP_ROOT="/var/backups/hardening/$(date +%Y%m%d-%H%M%S)"
-SECTIONS=(sysctl modules coredump journald gnome sudo pam su accounts services loopback cron sshd auditd audit-rules perms mic netprivacy mullvad kvmlan usbguard appunit time kargs)
+SECTIONS=(sysctl modules coredump journald gnome sudo pam pwage su accounts services loopback cron sshd auditd audit-rules perms mic netprivacy mullvad kvmlan usbguard appunit time kargs)
 
 # -----------------------------------------------------------------------------
 # Helpers
@@ -365,6 +367,37 @@ sec_pam() {
     rm -f /etc/security/pwquality.conf.d/90-cis.conf
   fi
   log "pwquality: min 14 chars, 4 character classes"
+}
+
+## CIS: password aging. login.defs (new accounts) + chage on every login account (uid >= 1000
+## with a usable password). No INACTIVE lock: root is locked, an expired + locked admin =
+## no sudo. No min age. An account whose password is already older than the max is skipped
+## (it would expire at once): change that password first, then run the section again.
+sec_pwage() {
+  local defs=/etc/login.defs u uid shell hash last today kv
+  today=$(( $(date +%s) / 86400 ))
+  backup "$defs"
+  for kv in "PASS_MAX_DAYS $PASS_MAX_DAYS" "PASS_WARN_AGE $PASS_WARN_AGE"; do
+    if grep -Eq "^[[:space:]]*${kv%% *}[[:space:]]" "$defs"; then      # set lines, not comments
+      sed -i -E "s/^[[:space:]]*${kv%% *}[[:space:]].*/${kv%% *}\t${kv#* }/" "$defs"
+    else
+      printf '%s\t%s\n' "${kv%% *}" "${kv#* }" >> "$defs"
+    fi
+  done
+  log "login.defs: PASS_MAX_DAYS $PASS_MAX_DAYS, PASS_WARN_AGE $PASS_WARN_AGE"
+  while IFS=: read -r u _ uid _ _ _ shell; do
+    (( uid >= 1000 && uid < 60000 )) || continue
+    [[ $shell == */nologin || $shell == */false ]] && continue
+    IFS=: read -r _ hash last _ < <(getent shadow "$u")
+    [[ $hash == [\!\*]* || -z $hash ]] && { log "$u: no usable password - skipped"; continue; }
+    if [[ -z $last || $last == 0 ]] || (( today - last >= PASS_MAX_DAYS - PASS_WARN_AGE )); then
+      if [[ -z $last || $last == 0 ]]; then last="never"; else last="$(( today - last )) days ago"; fi
+      warn "$u: password last changed $last - change it first, skipped"
+      continue
+    fi
+    chage -M "$PASS_MAX_DAYS" -W "$PASS_WARN_AGE" "$u" &&
+      log "$u: max $PASS_MAX_DAYS days, warning $PASS_WARN_AGE (changed $(( today - last )) days ago)"
+  done < <(getent passwd)
 }
 
 sec_su() {
@@ -1229,6 +1262,7 @@ main() {
       gnome)       sec_gnome ;;
       sudo)        sec_sudo ;;
       pam)         sec_pam ;;
+      pwage)       sec_pwage ;;
       su)          sec_su ;;
       accounts)    sec_accounts ;;
       services)    sec_services ;;

@@ -72,6 +72,7 @@ Tests run after hardening + reboot. All passed.
 | microphone off | `wpctl status` | `Sources:` empty |
 | no exposed listeners | `sudo ss -tulpn` | only localhost / `virbr0` / WireGuard |
 | loopback (firewalld) | `sudo firewall-cmd --zone=trusted --list-all` | `interfaces: lo`, 2 rich rules (127.0.0.1, ::1) |
+| password age | `sudo chage -l <user>` | `Maximum ... : 365`, `warning ... : 14` (both accounts) |
 | cron dir modes | `sudo stat -c '%a %n' /etc/cron.d /etc/cron.daily` | `700` (also after an rpm-ostree update + reboot) |
 | hostfw modes | `sudo hostfw status`; `sudo hostfw noscope status` | `mode: enforce`, `noscope: enforce`, `boot mode: enforce`; `noscope mode: enforce  boot: enforce`, `watcher: active` |
 | Secure Boot | `mokutil --sb-state` | `SecureBoot enabled` |

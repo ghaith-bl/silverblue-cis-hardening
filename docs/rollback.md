@@ -29,6 +29,7 @@ sudo hostfw noscope observe                      # out_noscope: log only again
 sudo firewall-cmd --permanent --zone=trusted --remove-interface=lo && sudo firewall-cmd --reload   # loopback
 sudo rm /etc/tmpfiles.d/90-cis-cron.conf          # cron modes no longer set at boot
 sudo rm /etc/tmpfiles.d/90-cis-grub.conf          # GRUB file modes no longer set at boot
+sudo chage -M 99999 <user>                        # pwage: no expiry (login.defs: backup)
 sudo cp /var/backups/hardening/<time>/etc/chrony.conf /etc/ && sudo systemctl restart chronyd
 sudo rpm-ostree kargs --delete=initcall_blacklist=af_alg_init   # then reboot
 sudo rpm-ostree kargs --delete=page_alloc.shuffle=1 --delete=rd.shell=0 --delete=rd.emergency=halt
