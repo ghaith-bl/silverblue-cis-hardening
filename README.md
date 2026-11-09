@@ -91,7 +91,7 @@ User names are given on the command line and stay out of git:
 ### Recommended order (low -> high risk)
 
 ```bash
-sudo ./harden-workstation.sh sysctl modules coredump journald services cron sshd auditd audit-rules perms mic
+sudo ./harden-workstation.sh sysctl modules coredump journald services loopback cron sshd auditd audit-rules perms mic
 systemctl reboot                      # test VPN, VMs, podman, a game
 sudo ./harden-workstation.sh sudo     # then: sudo -k && sudo true
 sudo ./harden-workstation.sh gnome su # then: su - (must fail), sudo true
@@ -120,12 +120,13 @@ sudo ./harden-workstation.sh kargs    # reboot: LUKS unlock, Wi-Fi, VPN, a VM
 | `modules`     | blocks unused filesystems / protocols | no HFS / UDF mounts |
 | `coredump`    | no core dumps | crashes not saved |
 | `journald`    | persistent, compressed journal, no syslog forward | none |
-| `gnome`       | no automount / autorun, 15 min idle lock (locked), no login user list | type the user name at login |
+| `gnome`       | no automount / autorun, 15 min idle lock, no login user list (all locked) | type the user name at login |
 | `sudo`        | `use_pty`, `/var/log/sudo.log`, 5 min timeout | password asked again after 5 min |
 | `pam`         | faillock (5 tries -> 15 min), pwhistory (24), pwquality (14 chars, 4 classes), no empty passwords | lockout includes the lock screen |
 | `su`          | `su` limited to the empty group `sugroup` | use `sudo` |
 | `accounts`    | CIS Controls v8 5.4: admin in wheel, hidden from and refused by GDM; daily user out of wheel, `mullvad`, `sectop`; homes 0700. Run 2 only from the admin | admin: text console only; daily user: no sudo, no Mullvad CLI |
 | `services`    | mask rpcbind / nfs / avahi, nftables.service | no mDNS |
+| `loopback`    | firewalld: `lo` in zone `trusted`, 127.0.0.1 / ::1 as source only toward themselves | none |
 | `cron`        | root-only cron dirs (modes set again at every boot by tmpfiles), `cron.allow` / `at.allow` | crontab: root + the daily user; `at`: root only |
 | `sshd`        | hardened drop-in `40-cis.conf`, server masked | no incoming SSH |
 | `auditd`      | SYSLOG / SUSPEND instead of HALT, log ring 40 x 32 MiB | up to 1280 MiB in `/var/log/audit` |

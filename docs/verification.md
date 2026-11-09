@@ -71,6 +71,8 @@ Tests run after hardening + reboot. All passed.
 | sudo log | `sudo tail -3 /var/log/sudo.log` | recent commands |
 | microphone off | `wpctl status` | `Sources:` empty |
 | no exposed listeners | `sudo ss -tulpn` | only localhost / `virbr0` / WireGuard |
+| loopback (firewalld) | `sudo firewall-cmd --zone=trusted --list-all` | `interfaces: lo`, 2 rich rules (127.0.0.1, ::1) |
+| cron dir modes | `sudo stat -c '%a %n' /etc/cron.d /etc/cron.daily` | `700` (also after an rpm-ostree update + reboot) |
 | hostfw modes | `sudo hostfw status`; `sudo hostfw noscope status` | `mode: enforce`, `noscope: enforce`, `boot mode: enforce`; `noscope mode: enforce  boot: enforce`, `watcher: active` |
 | Secure Boot | `mokutil --sb-state` | `SecureBoot enabled` |
 | kernel lockdown | `cat /sys/kernel/security/lockdown` | `[integrity]` |

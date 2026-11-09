@@ -65,7 +65,7 @@ else
 fi
 
 BACKUP_ROOT="/var/backups/hardening/$(date +%Y%m%d-%H%M%S)"
-SECTIONS=(sysctl modules coredump journald gnome sudo pam su accounts services cron sshd auditd audit-rules perms mic netprivacy mullvad kvmlan usbguard appunit time kargs)
+SECTIONS=(sysctl modules coredump journald gnome sudo pam su accounts services loopback cron sshd auditd audit-rules perms mic netprivacy mullvad kvmlan usbguard appunit time kargs)
 
 # -----------------------------------------------------------------------------
 # Helpers
@@ -271,6 +271,9 @@ EOF
 [org/gnome/login-screen]
 disable-user-list=true
 EOF
+    write_file /etc/dconf/db/gdm.d/locks/90-cis-hardening 0644 <<'EOF'
+/org/gnome/login-screen/disable-user-list
+EOF
   else
     warn "gdm dconf profile not found - skipped hiding the login user list"
   fi
@@ -461,6 +464,29 @@ sec_services() {
     systemctl disable nftables.service >/dev/null 2>&1 || true
     systemctl mask nftables.service >/dev/null 2>&1 && log "nftables.service masked (firewalld manages nftables)"
   fi
+}
+
+## CIS: loopback traffic (firewalld): lo in zone trusted, 127.0.0.1 / ::1 as source only
+## toward themselves. Permanent config, then a firewalld reload (own table only: hostfw,
+## Mullvad and kvmlan tables stay).
+sec_loopback() {
+  local r
+  local -a rules=('rule family="ipv4" source address="127.0.0.1" destination not address="127.0.0.1" drop'
+                  'rule family="ipv6" source address="::1" destination not address="::1" drop')
+  command -v firewall-cmd >/dev/null || { warn "no firewall-cmd - skipped"; return 0; }
+  if firewall-cmd --permanent --zone=trusted --query-interface=lo >/dev/null 2>&1; then
+    log "lo already in zone trusted"
+  else
+    firewall-cmd --permanent --zone=trusted --add-interface=lo >/dev/null && log "lo -> zone trusted"
+  fi
+  for r in "${rules[@]}"; do
+    if firewall-cmd --permanent --zone=trusted --query-rich-rule="$r" >/dev/null 2>&1; then
+      log "rich rule there: $r"
+    else
+      firewall-cmd --permanent --zone=trusted --add-rich-rule="$r" >/dev/null && log "rich rule: $r"
+    fi
+  done
+  firewall-cmd --reload >/dev/null && log "firewalld reloaded"
 }
 
 sec_cron() {
@@ -1176,6 +1202,7 @@ main() {
       su)          sec_su ;;
       accounts)    sec_accounts ;;
       services)    sec_services ;;
+      loopback)    sec_loopback ;;
       cron)        sec_cron ;;
       sshd)        sec_sshd ;;
       auditd)      sec_auditd ;;

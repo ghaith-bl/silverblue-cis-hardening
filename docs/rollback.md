@@ -26,6 +26,8 @@ sudo systemctl disable --now usbguard               # USB protection off
 sudo usbguard append-rule 'allow id <vid>:<pid> ...'   # one device for good (sudo usbguard list-devices)
 sudo rm /usr/local/share/applications/brave-browser.desktop /usr/local/bin/app-unit   # appunit off
 sudo hostfw noscope observe                      # out_noscope: log only again
+sudo firewall-cmd --permanent --zone=trusted --remove-interface=lo && sudo firewall-cmd --reload   # loopback
+sudo rm /etc/tmpfiles.d/90-cis-cron.conf          # cron modes no longer set at boot
 sudo cp /var/backups/hardening/<time>/etc/chrony.conf /etc/ && sudo systemctl restart chronyd
 sudo rpm-ostree kargs --delete=initcall_blacklist=af_alg_init   # then reboot
 sudo rpm-ostree kargs --delete=page_alloc.shuffle=1 --delete=rd.shell=0 --delete=rd.emergency=halt
