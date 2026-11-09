@@ -714,17 +714,24 @@ sec_perms() {
   chmod 0640 /etc/audit/auditd.conf /etc/audit/audit.rules /etc/audit/rules.d/*.rules 2>/dev/null || true
   log "audit config files -> 0640"
 
-  for f in /boot/grub2/grub.cfg /boot/grub2/user.cfg; do
-    if [[ -f $f ]]; then chmod 0600 "$f"; log "$f -> 0600"; fi
-  done
+  # every file in /boot/grub2 (also the empty marker .grub2-blscfg-supported); tmpfiles sets
+  # the known ones again at boot, after a bootloader update wrote them with 0644
+  if [[ -d /boot/grub2 ]]; then
+    find /boot/grub2 -maxdepth 1 -type f -perm /0077 -exec chmod go-rwx {} + && log "/boot/grub2 files -> 0600"
+  fi
+  write_file /etc/tmpfiles.d/90-cis-grub.conf 0644 <<'EOF'
+z /boot/grub2/grub.cfg                0600 root root -
+z /boot/grub2/user.cfg                0600 root root -
+z /boot/grub2/grubenv                 0600 root root -
+z /boot/grub2/.grub2-blscfg-supported 0600 root root -
+EOF
 
   for u in "$TARGET_USER" "$ADMIN_USER"; do          # the admin's home too (skel: 0644)
     [[ -n $u ]] && id "$u" >/dev/null 2>&1 || continue
     home=$(user_home "$u")
-    for f in .bashrc .bash_profile .bash_logout .profile .zshrc .zprofile; do
-      if [[ -f $home/$f ]]; then chmod g-wx,o-rwx "$home/$f"; fi
-    done
-    log "shell init files in $home -> 0740 or stricter"
+    # every dotfile in the home, not only shell rc (the scanner checks .gitconfig too)
+    find "$home" -maxdepth 1 -type f -name '.*' -perm /0037 -exec chmod g-wx,o-rwx {} +
+    log "dotfiles in $home -> 0740 or stricter"
   done
 }
 
