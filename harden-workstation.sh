@@ -225,12 +225,27 @@ EOF
 }
 
 sec_journald() {
+  local main=/etc/systemd/journald.conf
   write_file /etc/systemd/journald.conf.d/90-cis.conf 0644 <<'EOF'
 [Journal]
 Storage=persistent
 Compress=yes
 ForwardToSyslog=no
 EOF
+  # also in the main file: the scanner reads only /etc/systemd/journald.conf (Fedora ships
+  # the main file in /usr/lib, comments only; the drop-in above wins either way)
+  if [[ ! -e $main ]]; then
+    write_file "$main" 0644 <<'EOF'
+# CIS: ForwardToSyslog also here for scanners; settings: journald.conf.d/90-cis.conf
+[Journal]
+ForwardToSyslog=no
+EOF
+  elif grep -Eq '^[#[:space:]]*ForwardToSyslog=' "$main"; then
+    backup "$main"
+    sed -i -E 's/^[#[:space:]]*ForwardToSyslog=.*/ForwardToSyslog=no/' "$main" && log "$main: ForwardToSyslog=no"
+  else
+    warn "$main has no ForwardToSyslog line: add ForwardToSyslog=no under [Journal] by hand"
+  fi
   systemctl restart systemd-journald && log "journald restarted"
 }
 
@@ -272,6 +287,14 @@ EOF
 disable-user-list=true
 EOF
     write_file /etc/dconf/db/gdm.d/locks/90-cis-hardening 0644 <<'EOF'
+/org/gnome/login-screen/disable-user-list
+EOF
+    # the same in db "distro" (also in GDM's profile): scap-security-guide checks only there
+    write_file /etc/dconf/db/distro.d/90-cis-hardening 0644 <<'EOF'
+[org/gnome/login-screen]
+disable-user-list=true
+EOF
+    write_file /etc/dconf/db/distro.d/locks/90-cis-hardening 0644 <<'EOF'
 /org/gnome/login-screen/disable-user-list
 EOF
   else

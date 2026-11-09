@@ -119,8 +119,8 @@ sudo ./harden-workstation.sh kargs    # reboot: LUKS unlock, Wi-Fi, VPN, a VM
 | `sysctl`      | kernel + network hardening (`/etc/sysctl.d/90-hardening.conf`) | `dmesg`, gdb / strace attach need sudo |
 | `modules`     | blocks unused filesystems / protocols | no HFS / UDF mounts |
 | `coredump`    | no core dumps | crashes not saved |
-| `journald`    | persistent, compressed journal, no syslog forward | none |
-| `gnome`       | no automount / autorun, 15 min idle lock, no login user list (all locked) | type the user name at login |
+| `journald`    | persistent, compressed journal, no syslog forward (drop-in + main file) | none |
+| `gnome`       | no automount / autorun, 15 min idle lock, no login user list (dconf `gdm` + `distro`, all locked) | type the user name at login |
 | `sudo`        | `use_pty`, `/var/log/sudo.log`, 5 min timeout | password asked again after 5 min |
 | `pam`         | faillock (5 tries -> 15 min), pwhistory (24), pwquality (14 chars, 4 classes), no empty passwords | lockout includes the lock screen |
 | `su`          | `su` limited to the empty group `sugroup` | use `sudo` |
