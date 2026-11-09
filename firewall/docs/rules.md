@@ -69,10 +69,8 @@ allows them the way `inet mullvad` does (uid 0, tcp 443, one address), nothing e
 add <pid>`) sets ct mark 0xf41 + mark 0x6d6f6c65, Mullvad then routes the program
 outside the tunnel. `/usr/bin/mullvad-exclude` is setuid root: any local user, malware
 in the daily account too, can start a program there (checked as the daily user
-2026-11-05: the process lands in net_cls `/mullvad-exclusions`). Before: such traffic
-ended in out_lan / out_leak, rejected only in enforce mode, allowed in observe and by
-the uplink exceptions (DHCP, router ping, router-open, lan_allow4); test 2026-11-01:
-observe-log.md.
+2026-11-05: the process lands in net_cls `/mullvad-exclusions`). Why its own rule, tests:
+observe-log.md (2026-11-01, 2026-11-05).
 - own deny chain, `reject` in it, no `jump enforce`: blocked in observe too, no switch
   (split tunneling is not used on this host)
 - any interface but `if_vm`: kvmlan puts the same marks on host <-> VM packets
@@ -127,7 +125,7 @@ its scope (Brave rpm; fix: appunit section). Its flows have no program name anyw
 - `jump deny_out_noscope` (not goto): count + log + `jump enforce_noscope`; observe
   returns and the rest of output decides as for any flow
 - own switch: `hostfw noscope observe | enforce`, boot mode `/etc/hostfw/noscope`
-  (default observe). The global `enforce` does not touch it
+  (fresh install: observe; this host: enforce). The global `enforce` does not touch it
 - set `noscope_cg`: nft resolves a path to the cgroup id when the element is added, a
   new login = new id. hostfw-noscope.service (root, CAP_NET_ADMIN only) looks every 5 s
   (paths + inode, files only) and rewrites the set in one transaction on a change.

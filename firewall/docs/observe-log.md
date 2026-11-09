@@ -27,8 +27,8 @@ Counters reset every boot -> use `hostfw report` (reads kernel journal).
 - CLI connect: proton0 + pvpnksintrf0 back
 
 ## Open
-- connect with a too old server list in enforce: happened 2026-10-26 (section below).
-  Escape hatch in firewall/README.md. Planned: exception for the connect unit only.
+- none. Proton connect with a too old server list (2026-10-26, section below): closed,
+  Proton removed the same day (docs/mullvad.md).
 
 ## 2026-10-19 probe exception
 - proton_entry4 (908 EntryIPs) + proton_probe_tcp (443,7770,8443) filled by `hostfw sync`.
@@ -222,3 +222,8 @@ Counters reset every boot -> use `hostfw report` (reads kernel journal).
 - Test (admin console): tunnel and VM flows unchanged; as the daily user
   `mullvad-exclude curl -m 10 https://am.i.mullvad.net/connected` fails fast, out_split
   grows, one `HFW-OUT-SPLIT` line with UID=1000.
+
+## 2026-11-07: out_noscope enforce
+- `sudo hostfw noscope enforce` (boot: /etc/hostfw/noscope = enforce) after log only
+  since 2026-11-03. Brave starts in its own unit since then (appunit section).
+- Undo: `sudo hostfw noscope observe`.

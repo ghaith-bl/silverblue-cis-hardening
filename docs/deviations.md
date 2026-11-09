@@ -22,7 +22,7 @@ Input for an OpenSCAP tailoring file.
 | `accounts_minimum_age_login_defs`, `accounts_password_set_min_life_existing` | skip | NIST SP 800-63B advises against forced periodic password changes (max age: Two accounts) |
 | `accounts_tmout` | skip | GNOME idle lock (15 min, locked) covers it |
 | `banner_etc_issue_cis`, `banner_etc_issue_net_cis`, `dconf_gnome_banner_enabled`, `dconf_gnome_login_banner_text`, `sshd_enable_warning_banner_net` | skip | legal banners - value in organisations, not on a personal device |
-| `package_systemd-journal-remote_installed` | skip (later) | needs a log server - planned for the homelab |
+| `package_systemd-journal-remote_installed` | skip | needs a log server on a second device; none now |
 | `accounts_passwords_pam_faillock_even_deny_root_or_root_unlock_time` | skip | root account is locked; `su` restricted to an empty group |
 | `ensure_root_password_configured` | skip | root is locked; emergency shell refuses access instead of opening unauthenticated |
 | `service_bluetooth_disabled` | skip | service already disabled manually; masking optional |
@@ -44,7 +44,7 @@ Input for an OpenSCAP tailoring file.
 | `auditd_data_disk_full_action`, `auditd_data_retention_admin_space_left_action` | `SUSPEND` | CIS `HALT`/`SINGLE` would stop a laptop when the disk fills |
 | `auditd_data_retention_space_left_action` | `SYSLOG` | no local MTA for `EMAIL` |
 | `auditd_data_retention_max_log_file_action` | keep `ROTATE` | CIS `KEEP_LOGS` has no limit; `/var` also holds `/var/home` |
-| `auditd_data_retention_max_log_file`, `auditd_data_retention_num_logs` | `32` MiB x `40` files | ring >= 1 week (DISA STIG RHEL 9 V-258155). 2026-10-20: measured 2.3 MiB/h with sectop mostly closed, estimated 6.6 MiB/h with sectop polling as root every 6 s (until its privilege split) |
+| `auditd_data_retention_max_log_file`, `auditd_data_retention_num_logs` | `32` MiB x `40` files | ring >= 1 week (DISA STIG RHEL 9 V-258155). 2026-10-20: measured 2.3 MiB/h with sectop mostly closed, estimated 6.6 MiB/h with sectop polling as root every 6 s (before its privilege split; sectop runs no root commands now) |
 | `audit_rules_dac_modification_*` (14), `audit_rules_file_deletion_events_*` (5), `audit_rules_unsuccessful_file_modification_*` (5) | off by default | thousands of events/hour from Steam and Brave caches; `ENABLE_NOISY_AUDIT=yes` to apply |
 | `audit_rules_time_clock_settime` | `subj_type!=chronyd_t` filter | chronyd adjusts the clock constantly |
 
@@ -83,7 +83,8 @@ Input for an OpenSCAP tailoring file.
   20 queries uid 990 out of the tunnel, blocked by hostfw (`out_dns`), not a leak.
   Cost: no DNS without the tunnel (captive portals: already closed by lockdown). New
   networks get DHCP DNS: run netprivacy again.
-- hostfw observe week ended after 1 day (2026-10-19). Findings: firewall/docs/observe-log.md.
+- hostfw: enforce from boot, out_noscope (GNOME Shell's cgroup) enforce too. Observe
+  findings and history: firewall/docs/observe-log.md.
 - VMs with Allow LAN off (kvmlan section, 2026-11-04). Problem: Mullvad's LAN block also
   covers `virbr0`: no DHCP lease in the VMs, host -> VM ssh refused at once (found
   2026-11-04, Mullvad since 2026-10-26; `mullvad lan get` = block, hostfw logged nothing).

@@ -69,6 +69,8 @@ Installed paths:
 - switch = flush/add one rule in chain `enforce`. live, atomic, no reload
 - out_noscope (flows from GNOME Shell's cgroup): own switch, chain `enforce_noscope`,
   `hostfw noscope observe | enforce | status` (docs/rules.md)
+- this host: mode enforce and noscope enforce, both from boot (`/etc/hostfw/mode`,
+  `/etc/hostfw/noscope`): `sudo hostfw status`, `sudo hostfw noscope status`
 
 ## Workflow
 

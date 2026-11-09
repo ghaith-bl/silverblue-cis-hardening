@@ -38,7 +38,8 @@ Remaining `fail` items (approx.):
 - KVM/libvirt NAT network (`virbr0`), rootless Podman + kind, toolbox
 - Steam (Flatpak), Brave (RPM, Brave's repo), Mullvad VPN (RPM, CLI), lockdown mode,
   auto-connect at boot
-- hostfw: own nftables egress filter next to firewalld, enforce from boot
+- hostfw: own nftables egress filter next to firewalld, enforce from boot (out_noscope
+  too)
 - Secure Boot on, kernel lockdown `integrity`, only Fedora-signed kernel modules, no NVIDIA
   driver (dGPU off, supergfxctl `Integrated`) -> [docs/secure-boot.md](docs/secure-boot.md)
 - OpenSCAP 1.4.4, scap-security-guide 0.1.82
@@ -122,7 +123,7 @@ sudo ./harden-workstation.sh kargs    # then reboot: LUKS unlock, Wi-Fi, VPN, a 
 | `cron`        | root-only cron dirs, `cron.allow` / `at.allow` | only root + your user can use crontab |
 | `sshd`        | hardened drop-in `40-cis.conf`, server masked | no incoming SSH |
 | `auditd`      | SYSLOG / SUSPEND actions instead of HALT, log ring 40 x 32 MiB | up to 1280 MiB in `/var/log/audit` |
-| `audit-rules` | ~70 CIS rules, `-c`, setuid list, `-e 2` lock; not CIS: `af-alg` (AF_ALG sockets, 2 rules) | more log volume; once locked, a rule change needs a reboot |
+| `audit-rules` | ~70 CIS rules, `-c`, setuid list (from the files on the host), `-e 2` lock; not CIS: `af-alg` (AF_ALG sockets, 2 rules). This host: 73 loaded | more log volume; once locked, a rule change needs a reboot |
 | `perms`       | audit config 0640, GRUB cfg 0600, shell rc files 0740 | none |
 | `mic`         | WirePlumber rule disables capture nodes | no microphone |
 | `netprivacy`  | not CIS: random MAC (Wi-Fi + cable), no hostname in DHCP (every profile), generic hostname (also as fallback, kernel arg: from the first second of boot), DHCP ids from that MAC, IPv6 temporary addresses, LLMNR + mDNS off in resolved, no DNS servers in Wi-Fi / cable profiles (only the tunnel) | new device on the router at every connect: no DHCP reservation; prompt shows `localhost`; no DNS without the tunnel |
@@ -172,7 +173,7 @@ sudo ostree admin config-diff                    # every /etc change vs. image d
 - Removing a sysctl file does not revert values until reboot.
 - `kernel.kexec_load_disabled` and `kernel.unprivileged_bpf_disabled = 1` are one-way until reboot.
 
-## Two accounts (2026-11-05)
+## Two accounts
 
 CIS Controls v8 5.4, NIST SP 800-53 AC-6(2), NSA/CISA AA23-278A #2: admin work from an
 account used for nothing else.
@@ -216,7 +217,6 @@ cd ~/my-project/silverblue-cis-hardening && tools/admin-run.sh step.sh
 
 - option, only if a network ever blocks Direct: hostfw mirrors whatever `inet mullvad`
   allows at the time, and Bridges / Encrypted DNS proxy go back on
-- health-report script
 
 ## Docs
 
