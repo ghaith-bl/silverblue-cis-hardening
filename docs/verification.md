@@ -53,7 +53,7 @@ Tests run after hardening + reboot. All passed.
 
 | Check | Command | Expected |
 |-------|---------|----------|
-| audit rules loaded | `sudo auditctl -l \| wc -l` | ~73 |
+| audit rules loaded | `sudo auditctl -l \| wc -l` | 73 (this host; changes with the setuid list) |
 | setuid / setgid audited | `sudo auditctl -l \| grep -c 'key=privileged'` | `find /usr -xdev -type f \( -perm -4000 -o -perm -2000 \) \| wc -l` (28 on 2026-11-01) |
 | audit rules locked | `sudo auditctl -s \| grep enabled` | `enabled 2` |
 | lock refuses changes | `sudo auditctl -w /tmp -p wa -k test`; `sudo auditctl -l \| wc -l` | error; count unchanged |
