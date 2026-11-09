@@ -126,11 +126,11 @@ sudo ./harden-workstation.sh kargs    # reboot: LUKS unlock, Wi-Fi, VPN, a VM
 | `su`          | `su` limited to the empty group `sugroup` | use `sudo` |
 | `accounts`    | CIS Controls v8 5.4: admin in wheel, hidden from and refused by GDM; daily user out of wheel, `mullvad`, `sectop`; homes 0700. Run 2 only from the admin | admin: text console only; daily user: no sudo, no Mullvad CLI |
 | `services`    | mask rpcbind / nfs / avahi, nftables.service | no mDNS |
-| `cron`        | root-only cron dirs, `cron.allow` / `at.allow` | crontab: root + the daily user; `at`: root only |
+| `cron`        | root-only cron dirs (modes set again at every boot by tmpfiles), `cron.allow` / `at.allow` | crontab: root + the daily user; `at`: root only |
 | `sshd`        | hardened drop-in `40-cis.conf`, server masked | no incoming SSH |
 | `auditd`      | SYSLOG / SUSPEND instead of HALT, log ring 40 x 32 MiB | up to 1280 MiB in `/var/log/audit` |
 | `audit-rules` | CIS rules, `-c`, setuid list from the host, `-e 2` lock; not CIS: `af-alg` (2 rules). This host: 73 | more log volume; a rule change needs a reboot |
-| `perms`       | audit config 0640, GRUB cfg 0600, shell rc files 0740 | none |
+| `perms`       | audit config 0640, GRUB cfg 0600, shell rc files 0740 (daily user and admin) | none |
 | `mic`         | WirePlumber rule disables capture nodes | no microphone |
 | `netprivacy`  | not CIS: random MAC, no hostname in DHCP, generic hostname (also a kernel arg), DHCP ids from that MAC, IPv6 temporary addresses, LLMNR + mDNS off, no DNS servers in Wi-Fi / cable profiles | new device on the router each connect; prompt shows `localhost`; no DNS without the tunnel |
 | `mullvad`     | not CIS: Mullvad management socket only for group `mullvad`, the admin in it | `mullvad` CLI for the admin only |

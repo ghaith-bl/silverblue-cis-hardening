@@ -468,6 +468,17 @@ sec_cron() {
   for f in /etc/crontab /etc/cron.d /etc/cron.hourly /etc/cron.daily /etc/cron.weekly /etc/cron.monthly /etc/cron.yearly; do
     if [[ -e $f ]]; then chown root:root "$f"; chmod og-rwx "$f"; fi
   done
+  # the dirs were back at the image mode 0755 on 2026-11-09 (crontab kept 0600): tmpfiles
+  # sets the modes again at every boot ("z": existing paths only)
+  write_file /etc/tmpfiles.d/90-cis-cron.conf 0644 <<'EOF'
+z /etc/crontab      0600 root root -
+z /etc/cron.d       0700 root root -
+z /etc/cron.hourly  0700 root root -
+z /etc/cron.daily   0700 root root -
+z /etc/cron.weekly  0700 root root -
+z /etc/cron.monthly 0700 root root -
+z /etc/cron.yearly  0700 root root -
+EOF
   if [[ -e /etc/cron.deny ]]; then backup /etc/cron.deny; rm -f /etc/cron.deny; fi
   if [[ -n $TARGET_USER ]]; then
     printf 'root\n%s\n' "$TARGET_USER" | write_file /etc/cron.allow 0640
@@ -673,7 +684,7 @@ EOF
 }
 
 sec_perms() {
-  local home f
+  local home f u
   chmod 0640 /etc/audit/auditd.conf /etc/audit/audit.rules /etc/audit/rules.d/*.rules 2>/dev/null || true
   log "audit config files -> 0640"
 
@@ -681,13 +692,14 @@ sec_perms() {
     if [[ -f $f ]]; then chmod 0600 "$f"; log "$f -> 0600"; fi
   done
 
-  if [[ -n $TARGET_USER ]]; then
-    home=$(user_home "$TARGET_USER")
+  for u in "$TARGET_USER" "$ADMIN_USER"; do          # the admin's home too (skel: 0644)
+    [[ -n $u ]] && id "$u" >/dev/null 2>&1 || continue
+    home=$(user_home "$u")
     for f in .bashrc .bash_profile .bash_logout .profile .zshrc .zprofile; do
       if [[ -f $home/$f ]]; then chmod g-wx,o-rwx "$home/$f"; fi
     done
     log "shell init files in $home -> 0740 or stricter"
-  fi
+  done
 }
 
 sec_mic() {
