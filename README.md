@@ -39,7 +39,7 @@ Reports stay on the host, never in git (`.gitignore`: `scap-*`).
 
 ## Environment
 
-- Fedora Silverblue 44: rpm-ostree, composefs (`/` is overlay), kernel 7.2
+- Fedora Silverblue 44: rpm-ostree, composefs (`/` is overlay), Fedora kernel (current)
 - LUKS full-disk encryption, SELinux enforcing, firewalld default zone `drop`
 - Secure Boot on, kernel lockdown `integrity`, only Fedora-signed modules, no NVIDIA
   driver (dGPU off) -> [docs/secure-boot.md](docs/secure-boot.md)
