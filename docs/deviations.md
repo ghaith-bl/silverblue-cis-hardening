@@ -47,6 +47,7 @@ Input for an OpenSCAP tailoring file.
 | `auditd_data_retention_max_log_file`, `auditd_data_retention_num_logs` | `32` MiB x `40` files | ring >= 1 week (DISA STIG RHEL 9 V-258155). 2026-10-20: measured 2.3 MiB/h with sectop mostly closed, estimated 6.6 MiB/h with sectop polling as root every 6 s (before its privilege split; sectop runs no root commands now) |
 | `audit_rules_dac_modification_*` (14), `audit_rules_file_deletion_events_*` (5), `audit_rules_unsuccessful_file_modification_*` (5) | off by default | thousands of events/hour from Steam and Brave caches; `ENABLE_NOISY_AUDIT=yes` to apply |
 | `audit_rules_time_clock_settime` | `subj_type!=chronyd_t` filter | chronyd adjusts the clock constantly |
+| `accounts_password_pam_modules_in_authselect_profile` | keep Fedora's authselect profile `local` | the rule wants a custom profile copied from `local`; the PAM lines would be the same (faillock, pwhistory, pwquality: features of `local`, set by the `pam` section). A copy gets no fixes from Fedora's updates of `local`, and a broken custom profile can lock out the only sudo account (root is locked). Decision 2026-11-09 |
 
 ## Scanner false positives on Silverblue (verified manually)
 
@@ -56,10 +57,17 @@ Input for an OpenSCAP tailoring file.
 | `audit_rules_kernel_module_loading_create`, `..._query` | `create_module` / `query_module` do not exist on x86_64 | - |
 | `ensure_fedora_gpgkey_installed` | ostree verifies commits with its own remote keys | `grep -r gpg-verify /etc/ostree/remotes.d/` |
 | `package_cron_installed` | `cronie` is layered | `rpm -q cronie` |
-| `sysctl_kernel_yama_ptrace_scope`, `sysctl_fs_suid_dumpable` | conflicting defaults in `/usr/lib/sysctl.d/` (`10-default-yama-scope.conf` sets `0`); ours loads last | `sysctl kernel.yama.ptrace_scope fs.suid_dumpable` -> `2`, `0` |
+| `sysctl_fs_suid_dumpable` | another value in `/usr/lib/sysctl.d/`; ours (`90-hardening.conf`) loads last. `yama_ptrace_scope`: see Changed on purpose | `sysctl fs.suid_dumpable` -> `0` |
 | `file_groupownership_sshd_private_key` | Fedora uses group `ssh_keys` by design | - |
 | `sshd_*` | sshd is masked; hardened drop-in present | `systemctl is-enabled sshd` -> `masked` |
+| `accounts_password_pam_unix_authtok` | its check reads `/etc/pam.d/common-password`, a Debian path that Fedora does not have | `grep use_authtok /etc/pam.d/system-auth /etc/pam.d/password-auth` |
 | 16 `audit_rules_*` (execution, mac / networkconfig modification, privileged commands, suid_auid, sysadmin, pam.d) | rules loaded, different text format than the scanner regex | `sudo auditctl -l`, `ausearch -k <key>` |
+
+## Rootless container storage (scan 2026-11-09)
+
+| Rule | Decision | Reason |
+|------|----------|--------|
+| `no_files_or_dirs_unowned_by_user`, `no_files_or_dirs_ungroupowned`, `file_permissions_unauthorized_world_writable`, `dir_perms_world_writable_sticky_bits` | skip | every hit is in the daily user's home: the rootless Podman volume of my kind lab (node `kind-control-plane`). Inside, files belong to subordinate uids / gids (no passwd entry) and keep the container's own modes (world-writable dirs of the node image). The home is 0700: no other user reaches them. The scanner walks `/var/home` fully. Gone with the lab: `kind delete cluster` |
 
 ## Mullvad VPN (replaced Proton VPN 2026-10-26, docs/mullvad.md)
 - mullvad-daemon runs as root (owns its nftables table, routes, DNS). Package unit,

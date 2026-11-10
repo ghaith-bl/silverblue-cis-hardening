@@ -28,6 +28,11 @@ sudo rm /usr/local/share/applications/brave-browser.desktop /usr/local/bin/app-u
 sudo hostfw noscope observe                      # out_noscope: log only again
 sudo firewall-cmd --permanent --zone=trusted --remove-interface=lo && sudo firewall-cmd --reload   # loopback
 sudo rm /etc/tmpfiles.d/90-cis-cron.conf          # cron modes no longer set at boot
+sudo rm /etc/dconf/db/{gdm,distro}.d/90-cis-hardening /etc/dconf/db/{gdm,distro}.d/locks/90-cis-hardening
+sudo dconf update                                # login user list back (next GDM start)
+sudo rm /etc/systemd/journald.conf.d/90-cis.conf  # journald drop-in
+sudo rm /etc/systemd/journald.conf                # main file: only if the section created it (else backup)
+sudo systemctl restart systemd-journald
 sudo rm /etc/tmpfiles.d/90-cis-grub.conf          # GRUB file modes no longer set at boot
 sudo chage -M 99999 <user>                        # pwage: no expiry (login.defs: backup)
 sudo cp /var/backups/hardening/<time>/etc/chrony.conf /etc/ && sudo systemctl restart chronyd

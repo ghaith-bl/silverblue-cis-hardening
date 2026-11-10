@@ -19,19 +19,20 @@ whose default posture checks and watch list are this repo's baseline.
 
 | Result         | Before | 2026-10 | 2026-11-09 |
 |----------------|-------:|--------:|-----------:|
-| fail           |    227 |     115 |        109 |
-| pass           |    172 |     284 |        290 |
+| fail           |    227 |     115 |         96 |
+| pass           |    172 |     284 |        303 |
 | not applicable |     34 |      34 |         34 |
 
-The 109 fails (scan 2026-11-09, openscap 1.4.6, scap-security-guide 0.1.82):
+The 96 fails (scan 2026-11-09, openscap 1.4.6, scap-security-guide 0.1.82), each one
+checked by hand:
 
 | Count | Kind | Where |
 |------:|------|-------|
-| 57 | deviations on purpose: would break the machine, not useful on a personal laptop, two accounts, values changed on purpose | [docs/deviations.md](docs/deviations.md) |
-| 11 | scanner false positives on Silverblue (checks the wrong file, syscalls missing on x86_64, sshd masked) | [docs/deviations.md](docs/deviations.md) |
+| 56 | deviations on purpose: would break the machine, not useful on a personal laptop, two accounts, values changed on purpose, Fedora's own PAM profile | [docs/deviations.md](docs/deviations.md) |
+| 12 | scanner false positives on Silverblue / Fedora (checks the wrong file or a Debian path, syscalls missing on x86_64, sshd masked) | [docs/deviations.md](docs/deviations.md) |
 | 16 | audit rules loaded, written in another format than the scanner matches | [docs/deviations.md](docs/deviations.md) |
 | 8  | backlog: AIDE (4), CIS crypto-policy module, umask (3) | - |
-| 17 | open, being checked: cron dir modes (5), GRUB file mode, user init files, world-writable / unowned files (4), firewalld loopback (2), PAM authselect (2), GDM user list, journald ForwardToSyslog | - |
+| 4  | rootless container storage in the daily user's home (kind lab): subuid owners, the container's own modes | [docs/deviations.md](docs/deviations.md) |
 
 The profile is a DRAFT in scap-security-guide (based on the CIS Fedora 40 benchmark).
 Reports stay on the host, never in git (`.gitignore`: `scap-*`).

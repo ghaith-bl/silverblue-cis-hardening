@@ -26,6 +26,22 @@
 - `pwquality.conf.d/` works, but the scanner only checks `/etc/security/pwquality.conf`.
 - Never run `--remediate` on a desktop: server-oriented profiles break GUI/VPN.
 - Fedora CIS profiles are marked DRAFT - reference, not a contract.
+- Before changing a file for a failed rule, read what the check really reads (OVAL items
+  in the ARF / `--results` file). Found 2026-11-09 (scap-security-guide 0.1.82):
+  - `dconf_gnome_disable_user_list` checks only dconf db `distro` (`/etc/dconf/db/distro.d/`
+    + locks), not `gdm.d`; GDM's profile reads both.
+  - `journald_disable_forward_to_syslog` reads only `/etc/systemd/journald.conf`, no
+    drop-ins. Fedora 44 has no such file (defaults in `/usr/lib/systemd/`).
+  - `file_permission_user_init_files` = every top-level dotfile of a home (`.gitconfig`,
+    `.python_history`, ...), not only the shell init files.
+  - `file_permissions_boot_grub2` = every file in `/boot/grub2`, also the empty marker
+    `.grub2-blscfg-supported`.
+  - `accounts_password_pam_unix_authtok` reads `/etc/pam.d/common-password` (Debian):
+    fails on Fedora whatever `system-auth` says.
+  - Unowned / world-writable checks walk `/var/home` fully: old app data (Waydroid's
+    Android uids) and rootless container storage (subuids) show up there.
+- Cron dir modes set once (0700) were back at 0755 at a later scan, `/etc/crontab` kept
+  0600: set them at every boot (tmpfiles.d `z` lines), same for `/boot/grub2`.
 
 ## Silverblue / Fedora
 
