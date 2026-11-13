@@ -110,6 +110,7 @@ sudo ./harden-workstation.sh netprivacy  # close Brave first, then log out and i
 sudo ./harden-workstation.sh mullvad  # log out and in; mullvad status
 sudo ./harden-workstation.sh kvmlan   # VMs: lease + ssh with Allow LAN off
 sudo ./harden-workstation.sh browsevm # throwaway browsing VM, step 1: its network (new hostfw first)
+sudo browsevm/browsevm.sh build       # browsevm step 2: base image (unattended Fedora install)
 sudo rpm-ostree install usbguard && systemctl reboot
 sudo ./harden-workstation.sh usbguard # run 1 starts it: test keyboard, new device blocked,
                                       # sudo usb-allow-storage; run 2 enables it

@@ -23,7 +23,7 @@ jobs:
       - name: bash syntax
         run: |
           for f in harden-workstation.sh tools/*.sh usbguard/*.sh appunit/*.sh firewall/*.sh browsers/*.sh \
-                   browsers/brave/*.sh browsers/firefox/*.sh; do
+                   browsers/brave/*.sh browsers/firefox/*.sh browsevm/*.sh; do
             bash -n "$f"
           done
           sh -n firewall/nm-dispatcher/90-hostfw-sync
@@ -35,7 +35,7 @@ jobs:
         run: |
           shellcheck --version | head -2
           shellcheck -S warning harden-workstation.sh tools/*.sh usbguard/*.sh appunit/*.sh firewall/*.sh browsers/*.sh \
-            firewall/nm-dispatcher/90-hostfw-sync
+            browsevm/*.sh firewall/nm-dispatcher/90-hostfw-sync
 
       - name: private info (working tree, generic patterns)
         env:
