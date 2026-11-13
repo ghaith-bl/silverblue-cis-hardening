@@ -81,7 +81,9 @@ sudo ./harden-workstation.sh all
 | `MAC_MODE`             | `random`   | `random` = new MAC on every connect, `stable-ssid` = one per Wi-Fi network |
 | `GENERIC_HOSTNAME`     | `localhost`| hostname a network sees; `""` = keep mine |
 | `MULLVAD_SOCKET_GROUP` | `mullvad`  | group for the Mullvad CLI / GUI; `""` = any local user (Mullvad's default) |
-| `MULLVAD_VM_BRIDGES`   | `(virbr0)` | libvirt bridges outside Mullvad's LAN block (`kvmlan`); `()` = none |
+| `MULLVAD_VM_BRIDGES`   | `(virbr0 virbr-browse)` | libvirt bridges outside Mullvad's LAN block (`kvmlan`); `()` = none |
+| `BROWSEVM_BRIDGE`      | `virbr-browse` | `browsevm`: bridge of network `browse` (also in hostfw `if_vm_iso` and `MULLVAD_VM_BRIDGES`) |
+| `BROWSEVM_NET`         | `192.168.123` | `browsevm`: its /24 (host .1, DHCP .10-.20) |
 | `USBGUARD_BLOCK_BLUETOOTH` | `yes` | USB Bluetooth adapters blocked in the generated USBGuard rules |
 | `APP_UNITS`            | `(brave-browser)` | desktop ids `appunit` starts as their own service; `()` = none |
 | `ADMIN_USER`           | `""` (env) | `accounts`: text-console admin; `""` = one account |
@@ -107,6 +109,7 @@ sudo ADMIN_USER=<admin> DAILY_USER=<daily> ./harden-workstation.sh accounts
 sudo ./harden-workstation.sh netprivacy  # close Brave first, then log out and in
 sudo ./harden-workstation.sh mullvad  # log out and in; mullvad status
 sudo ./harden-workstation.sh kvmlan   # VMs: lease + ssh with Allow LAN off
+sudo ./harden-workstation.sh browsevm # throwaway browsing VM, step 1: its network (new hostfw first)
 sudo rpm-ostree install usbguard && systemctl reboot
 sudo ./harden-workstation.sh usbguard # run 1 starts it: test keyboard, new device blocked,
                                       # sudo usb-allow-storage; run 2 enables it
@@ -141,6 +144,7 @@ sudo ./harden-workstation.sh kargs    # reboot: LUKS unlock, Wi-Fi, VPN, a VM
 | `netprivacy`  | not CIS: random MAC, no hostname in DHCP, generic hostname (also a kernel arg), DHCP ids from that MAC, IPv6 temporary addresses, LLMNR + mDNS off, no DNS servers in Wi-Fi / cable profiles | new device on the router each connect; prompt shows `localhost`; no DNS without the tunnel |
 | `mullvad`     | not CIS: Mullvad management socket only for group `mullvad`, the admin in it | `mullvad` CLI for the admin only |
 | `kvmlan`      | not CIS: table `inet kvmlan`, Mullvad's split tunneling marks on host <-> VM packets of `MULLVAD_VM_BRIDGES` only (no accept / drop) | VM lease + host <-> VM ssh with Allow LAN off; VM internet only via the tunnel |
+| `browsevm`    | not CIS: throwaway VM for random links ([docs/browsevm.md](docs/browsevm.md)). Step 1: libvirt network `browse` (own bridge, not autostarted), firewalld zone `browsevm` + policies (to the host: DHCP + DNS only) | none until the VM exists; its traffic: tunnel only, never the LAN or a lab VM |
 | `usbguard`    | not CIS: rules from the devices present, CLI root only, `usb-allow-storage`, GNOME usb-protection off. Run twice: start + test, then enable | only known devices work, locked or not; flash drive: `sudo usb-allow-storage` |
 | `appunit`     | not CIS: apps in `APP_UNITS` start as `app-<id>@<pid>.service` (Brave left GNOME Shell's cgroup) | the app in its own unit; after a Brave update run it again |
 | `time`        | chrony: NTS only (Netnod + PTB), `authselectmode require`, `minsources 2`, no pool, no DHCP NTP | no time sync without the tunnel |

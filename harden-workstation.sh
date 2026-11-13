@@ -47,8 +47,11 @@ KERNEL_ARGS=(initcall_blacklist=af_alg_init page_alloc.shuffle=1 rd.shell=0 rd.e
                              # kargs section; () = add none
 MULLVAD_SOCKET_GROUP="mullvad"  # mullvad section: only this group may use the Mullvad CLI / GUI
                              # "" = any local user (Mullvad's default)
-MULLVAD_VM_BRIDGES=(virbr0)  # kvmlan section: libvirt bridges outside Mullvad's LAN block (Allow LAN
-                             # stays off; same names as if_vm in firewall/hostfw.nft); () = none
+MULLVAD_VM_BRIDGES=(virbr0 virbr-browse)  # kvmlan section: libvirt bridges outside Mullvad's LAN
+                             # block (Allow LAN stays off; same names as if_vm in firewall/hostfw.nft); () = none
+BROWSEVM_BRIDGE="virbr-browse"  # browsevm section: bridge of libvirt network "browse" (same name as
+                             # if_vm_iso in firewall/hostfw.nft and in MULLVAD_VM_BRIDGES)
+BROWSEVM_NET="192.168.123"   # browsevm section: /24 of that network (host .1, DHCP .10-.20)
 USBGUARD_BLOCK_BLUETOOTH="yes" # usbguard section: USB Bluetooth adapters blocked in the rules
                              # generated from the devices present ("no" = allowed like the rest)
 APP_UNITS=(brave-browser)    # appunit section: desktop ids started as their own service (launcher
@@ -67,7 +70,7 @@ else
 fi
 
 BACKUP_ROOT="/var/backups/hardening/$(date +%Y%m%d-%H%M%S)"
-SECTIONS=(sysctl modules coredump journald gnome sudo pam pwage su accounts services loopback cron sshd auditd audit-rules perms mic netprivacy mullvad kvmlan usbguard appunit time kargs)
+SECTIONS=(sysctl modules coredump journald gnome sudo pam pwage su accounts services loopback cron sshd auditd audit-rules perms mic netprivacy mullvad kvmlan browsevm usbguard appunit time kargs)
 
 # -----------------------------------------------------------------------------
 # Helpers
@@ -1047,6 +1050,105 @@ EOF
   log "VM without a lease: in the VM sudo nmcli connection up <profile>"
 }
 
+# fw_policy <name> <ingress zone> <egress zone> <target>: permanent firewalld policy
+fw_policy() {
+  local name=$1 in=$2 out=$3 target=$4
+  if [[ " $(firewall-cmd --permanent --get-policies) " != *" $name "* ]]; then
+    firewall-cmd --permanent --new-policy="$name" >/dev/null ||
+      { warn "could not create firewalld policy $name - skipped"; return 1; }
+    log "firewalld policy $name created"
+  fi
+  firewall-cmd --permanent --policy="$name" --query-ingress-zone="$in" >/dev/null ||
+    firewall-cmd --permanent --policy="$name" --add-ingress-zone="$in" >/dev/null || warn "policy $name: ingress $in"
+  firewall-cmd --permanent --policy="$name" --query-egress-zone="$out" >/dev/null ||
+    firewall-cmd --permanent --policy="$name" --add-egress-zone="$out" >/dev/null || warn "policy $name: egress $out"
+  firewall-cmd --permanent --policy="$name" --set-target="$target" >/dev/null || warn "policy $name: target $target"
+}
+
+## Not CIS, NIST SP 800-53 SC-44 (detonation chamber) / SC-39 / CIS Controls v8 Control 9:
+## random links in a throwaway VM (docs/browsevm.md). Step 1 = its network only: libvirt
+## NAT network "browse" on BROWSEVM_BRIDGE, firewalld zone "browsevm" + policies (DHCP + DNS
+## to the host, nothing else), hostfw if_vm_iso (tunnel only, never a lab VM or the LAN), kvmlan
+## marks (lease with Allow LAN off). Not autostarted: the VM unit starts it (step 3).
+sec_browsevm() {
+  local zone=browsevm net=browse xml=/etc/browsevm/network.xml want have
+  if ! command -v virsh >/dev/null || ! command -v firewall-cmd >/dev/null; then
+    warn "virsh or firewall-cmd missing - skipped"; return 0
+  fi
+  [[ $BROWSEVM_BRIDGE =~ ^[A-Za-z0-9_.-]{1,15}$ ]] || { warn "invalid BROWSEVM_BRIDGE - skipped"; return 0; }
+  [[ $BROWSEVM_NET =~ ^(10|172\.(1[6-9]|2[0-9]|3[01])|192\.168)(\.[0-9]{1,3}){1,2}$ ]] &&
+    [[ $(tr -cd . <<<"$BROWSEVM_NET") == .. ]] ||
+    { warn "BROWSEVM_NET must be the first 3 bytes of a private /24 (e.g. 192.168.123) - skipped"; return 0; }
+  # an address of that /24 on another interface (home LAN, another libvirt network) = clash
+  have=$(ip -4 -o addr show to "$BROWSEVM_NET.0/24" 2>/dev/null | awk -v br="$BROWSEVM_BRIDGE" '$2 != br {print $2, $4}')
+  if [[ -n $have ]]; then
+    warn "$BROWSEVM_NET.0/24 already used: $have - pick another BROWSEVM_NET"; return 0
+  fi
+
+  # firewalld: zone + 2 policies, the same shape as libvirt's own (libvirt.zone,
+  # libvirt-nat-out.policy, libvirt-to-host.policy) without ssh / tftp / IPv6:
+  # to the host DHCP + DNS only, rest rejected; out = ACCEPT here, hostfw decides where
+  if [[ " $(firewall-cmd --permanent --get-zones) " == *" $zone "* ]]; then
+    log "firewalld zone $zone exists"
+  else
+    firewall-cmd --permanent --new-zone="$zone" >/dev/null ||
+      { warn "could not create firewalld zone $zone - skipped"; return 0; }
+    log "firewalld zone $zone created"
+  fi
+  fw_policy "$zone-nat-out" "$zone" ANY ACCEPT || return 0
+  fw_policy "$zone-to-host" "$zone" HOST REJECT || return 0
+  for want in dhcp dns; do
+    firewall-cmd --permanent --policy="$zone-to-host" --query-service="$want" >/dev/null ||
+      firewall-cmd --permanent --policy="$zone-to-host" --add-service="$want" >/dev/null ||
+      warn "policy $zone-to-host: $want not added"
+  done
+  for have in $(firewall-cmd --permanent --policy="$zone-to-host" --list-services); do
+    [[ $have == dhcp || $have == dns ]] || {
+      firewall-cmd --permanent --policy="$zone-to-host" --remove-service="$have" >/dev/null || true
+      log "policy $zone-to-host: service $have removed"; }
+  done
+  if firewall-cmd --reload >/dev/null; then log "firewalld reloaded (own tables only: hostfw, Mullvad, kvmlan stay)"
+  else warn "firewall-cmd --reload failed"; fi
+
+  # libvirt network: NAT, own bridge in that zone, no autostart, no IPv6
+  write_file "$xml" 0644 <<EOF
+<!-- harden-workstation.sh browsevm: network of the throwaway browsing VM -->
+<network>
+  <name>$net</name>
+  <forward mode='nat'/>
+  <bridge name='$BROWSEVM_BRIDGE' stp='on' delay='0' zone='$zone'/>
+  <ip address='$BROWSEVM_NET.1' prefix='24'>
+    <dhcp>
+      <range start='$BROWSEVM_NET.10' end='$BROWSEVM_NET.20'/>
+    </dhcp>
+  </ip>
+</network>
+EOF
+  if virsh -q -c qemu:///system net-info "$net" >/dev/null 2>&1; then
+    have=$(virsh -q -c qemu:///system net-info "$net" | sed -n 's/^Bridge: *//p')
+    if [[ $have != "$BROWSEVM_BRIDGE" ]]; then
+      warn "network $net exists with bridge '$have', not $BROWSEVM_BRIDGE - not touched"; return 0
+    fi
+    log "libvirt network $net exists (bridge $have)"
+  else
+    virsh -q -c qemu:///system net-define "$xml" >/dev/null ||
+      { warn "virsh net-define $xml failed"; return 0; }
+    log "libvirt network $net defined"
+  fi
+  virsh -q -c qemu:///system net-autostart --disable "$net" >/dev/null 2>&1 || true
+
+  # the other two places that must know the bridge
+  if [[ " ${MULLVAD_VM_BRIDGES[*]} " != *" $BROWSEVM_BRIDGE "* ]]; then
+    warn "$BROWSEVM_BRIDGE not in MULLVAD_VM_BRIDGES: no lease with Allow LAN off (run kvmlan after fixing)"
+  fi
+  if nft list set inet hostfw if_vm_iso 2>/dev/null | grep -F "\"$BROWSEVM_BRIDGE\"" >/dev/null; then
+    log "hostfw: $BROWSEVM_BRIDGE in if_vm_iso (tunnel only)"
+  else
+    warn "hostfw live table has no $BROWSEVM_BRIDGE in if_vm_iso: install the new hostfw first"
+  fi
+  log "start for a test: sudo virsh net-start $net (stop: sudo virsh net-destroy $net)"
+}
+
 ## Not CIS. USBGuard: only devices in rules.conf work, locked or not, before login too.
 ## A flash drive: sudo usb-allow-storage (installed here) allows ONE blocked device whose
 ## every interface is mass storage, until it is unplugged. GNOME usb-protection off (it
@@ -1276,6 +1378,7 @@ main() {
       netprivacy)  sec_netprivacy ;;
       mullvad)     sec_mullvad ;;
       kvmlan)      sec_kvmlan ;;
+      browsevm)    sec_browsevm ;;
       usbguard)    sec_usbguard ;;
       appunit)     sec_appunit ;;
       time)        sec_time ;;

@@ -22,6 +22,10 @@ sudo rm /etc/systemd/system/mullvad-daemon.service.d/50-socket-group.conf
 sudo systemctl daemon-reload && sudo systemctl restart mullvad-daemon
 sudo systemctl disable --now kvmlan              # VMs blocked by Mullvad again (table deleted)
 sudo rm /etc/systemd/system/kvmlan.service /etc/kvmlan.nft && sudo systemctl daemon-reload
+sudo virsh net-destroy browse; sudo virsh net-undefine browse && sudo rm -r /etc/browsevm   # browsevm network
+sudo firewall-cmd --permanent --delete-policy=browsevm-nat-out
+sudo firewall-cmd --permanent --delete-policy=browsevm-to-host
+sudo firewall-cmd --permanent --delete-zone=browsevm && sudo firewall-cmd --reload
 sudo systemctl disable --now usbguard               # USB protection off
 sudo usbguard append-rule 'allow id <vid>:<pid> ...'   # one device for good (sudo usbguard list-devices)
 sudo rm /usr/local/share/applications/brave-browser.desktop /usr/local/bin/app-unit   # appunit off

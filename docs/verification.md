@@ -13,6 +13,7 @@ Tests run after hardening + reboot. All passed.
 | VM internet | `curl -sI https://archlinux.org` | `HTTP/2 200` |
 | VM lease, Allow LAN off | `mullvad lan get`; in the VM: `nmcli device status` | `block`; `enp1s0 ... connected` |
 | kvmlan table | `systemctl is-active kvmlan`; `sudo nft list table inet kvmlan` | `active`; chains `kvm_in`, `kvm_out` |
+| browsevm network | `sudo virsh net-info browse`; `firewall-cmd --get-zone-of-interface=virbr-browse` (started); `sudo nft list set inet hostfw if_vm_iso` | bridge `virbr-browse`, autostart no; `browsevm`; `virbr-browse` |
 | VM via Mullvad | in the VM: `curl https://am.i.mullvad.net/connected` | `You are connected to Mullvad` |
 | VM kill switch | `mullvad disconnect`; in the VM: `curl -sI -m 10 https://archlinux.org`; `mullvad connect`; again | fails; `HTTP/2 200` after connect |
 | VM large download (MTU) | `curl -o /dev/null 'https://speed.cloudflare.com/__down?bytes=20000000'` | 20000000 bytes |

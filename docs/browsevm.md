@@ -1,0 +1,63 @@
+# browsevm: throwaway VM for random links
+
+Status: step 1 (network) in `harden-workstation.sh browsevm`. Steps 2-5 not built yet.
+
+## Goal
+- random links never reach the daily user's files or the system
+- a browser only (Firefox), sound on, 4 GiB RAM, CPU graphics (no GPU)
+- nothing leaves the VM: no clipboard, no shared folder, no USB, no file export
+- refs: NIST SP 800-53 SC-44 (detonation chambers), SC-39 (process isolation), AC-6;
+  CIS Controls v8 Control 9 (email and web browser protections); Qubes OS disposable VMs
+
+## Why a VM, not a third user
+- a third user = DAC on the same kernel: browser exploit + kernel LPE = the whole host
+- VM: the exploit must also escape QEMU, and lands in `svirt_t` with its own MCS
+  category (sVirt), as user `qemu`: no access to the homes, /etc, other VM disks
+- `qemu:///system` only. GNOME Boxes / `qemu:///session`: QEMU runs as the daily user,
+  an escape = the daily user's files
+
+## Shape
+- guest: Fedora minimal + `cage` (Wayland kiosk) + Firefox full screen, auto login of a
+  user without sudo. Firefox prefs from `browsers/firefox` (user.js). Nothing else
+- disk: base image `/var/lib/libvirt/images/browsevm-base.qcow2`; the domain disk has
+  `<transient/>` (overlay made at start, deleted at shutdown): every start is clean,
+  downloads / cookies / malware gone at power off
+- updates: admin only, the base booted without `<transient/>`, `dnf upgrade --refresh`,
+  shutdown. Weekly or after a Firefox security release
+- 4 GiB RAM, 2 vCPU, base disk ~12 GiB
+- removed: spice-vdagent / spicevmc channel (clipboard), virtiofs / 9p, USB redirection,
+  smartcard, GL. Sound: ich9 + SPICE audio (the host has no capture nodes: `mic` section)
+- display: SPICE on a unix socket only, never TCP
+
+## Network (step 1, built)
+- libvirt network `browse` on `virbr-browse`, the /24 of `BROWSEVM_NET` (default 192.168.123), NAT, not autostarted
+- not `default`: hostfw accepts virbr0 <-> virbr0 (`fwd_vm_cross`): lab VMs reachable
+- hostfw `if_vm_iso`: out to the tunnel only; no new flow to / from another bridge or the
+  uplink (rule `fwd_vm_iso`, counter / log `fwd_vm_lan`)
+- firewalld: zone `browsevm`; policy `browsevm-to-host` REJECT with DHCP + DNS only;
+  policy `browsevm-nat-out` ACCEPT (hostfw + Mullvad decide where). Same shape as
+  libvirt's own `libvirt.zone`, `libvirt-to-host.policy`, `libvirt-nat-out.policy`
+- kvmlan marks the bridge: lease + DNS with Mullvad's Allow LAN off
+- Mullvad disconnected = no internet in the VM
+
+## Start / view from the daily user (step 3)
+- system unit `browsevm.service` (oneshot): `virsh start` / `virsh shutdown`, then destroy
+- polkit rule: the daily user may start / stop `browsevm.service` only
+  (`org.freedesktop.systemd1.manage-units`, `action.lookup("unit")`, verb). No libvirt
+  group (= root-equivalent)
+- view: `remote-viewer spice+unix:///run/browsevm/spice.sock` from a desktop file, socket
+  for one group with the daily user only. To test: owner / mode / SELinux label libvirt
+  gives the socket; fallback = small socket proxy unit
+
+## Residual risk
+- QEMU / KVM escape + SELinux bypass; CPU side channels
+- what is typed in the VM browser is seen there: no logins to real accounts
+- a needed file has no way out (by design)
+
+## Steps
+1. network: `browse`, firewalld zone + policies, hostfw `if_vm_iso`, kvmlan (done)
+2. base image: unattended Fedora minimal install (kickstart), cage + Firefox + user.js
+3. domain XML (transient disk, removed devices, sound), unit, polkit rule, desktop file
+4. checks: `ps -Z` (svirt_t + MCS), overlay gone after shutdown, no clipboard, sectop flows,
+   lab VM and LAN unreachable, Mullvad disconnect = no internet
+5. README, deviations, rollback, verification rows

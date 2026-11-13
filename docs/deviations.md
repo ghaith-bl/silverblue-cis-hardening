@@ -111,6 +111,17 @@ Input for an OpenSCAP tailoring file.
   Cost: hand-written marks are Mullvad's "privacy danger" area: a wrong rule can leak;
   keep the file as tested. A new libvirt network: its bridge in `MULLVAD_VM_BRIDGES` and
   in hostfw `if_vm` / `if_trusted`. Undo: `sudo systemctl disable --now kvmlan`.
+- Throwaway browsing VM (browsevm section, 2026-11-12, design: docs/browsevm.md). Not CIS;
+  NIST SP 800-53 SC-44 (detonation chamber), SC-39, CIS Controls v8 Control 9. Goal:
+  random links never reach the daily user's files or the system. A third local user was
+  rejected: same kernel, a browser exploit + kernel LPE owns the host.
+  Network (step 1): own libvirt network `browse` on `virbr-browse`, not `default`: hostfw
+  accepts virbr0 <-> virbr0 (`fwd_vm_cross`, lab VMs talk to each other); `if_vm_iso`
+  = tunnel only, no new flow to or from another bridge or the uplink (counter / log
+  `fwd_vm_lan`, rule comment `fwd_vm_iso`). firewalld: zone `browsevm` + policies
+  `browsevm-nat-out` (ACCEPT, hostfw decides where) and `browsevm-to-host` (REJECT, DHCP +
+  DNS only), the shape of libvirt's own zone / policies without ssh, tftp, IPv6. kvmlan
+  marks for the bridge (lease with Allow LAN off). Not autostarted.
 
 ## Brave: RPM, not Flatpak (not CIS)
 - Brave's own RPM repo, layered (browsers/README.md). Why: Brave's own build with the
