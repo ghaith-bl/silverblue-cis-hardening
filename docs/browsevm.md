@@ -47,8 +47,12 @@ sudo browsevm/browsevm.sh build            # once; --force rebuilds (old one -> 
 BROWSEVM_FEDORA=44 sudo -E browsevm/browsevm.sh build   # other release
 ```
 - `virt-install --location` (Fedora Everything tree) + `browsevm/browsevm.ks` injected
-  into the initrd, `--graphics none`, serial console to `/var/log/browsevm/build-*.log`,
-  `--noreboot`; the kickstart powers off. Build domain undefined after, disk kept
+  into the initrd, `--graphics none`, serial console on a pty logged by virtlogd to
+  `/var/log/libvirt/qemu/browsevm-build-*.serial.log` (a plain file chardev in a root 0750
+  folder failed: Permission denied, 2026-11-13), `--noreboot`; the kickstart powers off.
+  Build domain undefined after, disk kept
+- speed probe first (`images/pxeboot/vmlinuz` of the tree): under `BROWSEVM_MIN_KBPS`
+  (200 KB/s) it stops; the first run spent ~50 min on the installer kernel + initrd alone
 - network `browse` during the install (started and stopped again if it was off):
   packages come through Mullvad like any VM traffic
 - kickstart: Fedora `@core` + cage + firefox + mozilla-ublock-origin + pipewire +
@@ -63,11 +67,12 @@ BROWSEVM_FEDORA=44 sudo -E browsevm/browsevm.sh build   # other release
   uBlock Origin force-installed from the Fedora package's local .xpi + Mullvad Browser
   Extension + no first-run / post-update pages + no profile import. Interface English
   (en_US, no langpacks); Arabic fonts only so Arabic text on pages is readable
-- Mullvad Browser Extension (beta, AMO slug `mullvad-vpn`): the host downloads the
-  Mozilla-signed xpi at build (through Mullvad), its add-on ID is read from the xpi's
-  manifest, the xpi goes into the image (`/usr/share/browsevm/`) and is force-installed
-  from there: no AMO request at every start. Firefox checks the signature at install and
-  updates it from AMO during a session. Shows the connection (Mullvad server, DNS),
+- Mullvad Browser Extension (beta): Mullvad ships it itself, not on AMO (the AMO URL gave
+  404). The host downloads `cdn.mullvad.net/browser-extension/<v>/...xpi`
+  (`BROWSEVM_MULLVAD_EXT`, default 0.9.11) at build through Mullvad, its add-on ID is read
+  from the xpi's manifest, the xpi goes into the image (`/usr/share/browsevm/`) and is
+  force-installed from there: no download at every start. The xpi is Mozilla-signed:
+  Firefox checks the signature at install. Shows the connection (Mullvad server, DNS),
   WebRTC toggle; its SOCKS5 proxy (other exit location) works because the VM is inside
   the host's tunnel. Optional permissions (proxy, tabs, all URLs) only if the proxy is
   turned on. Not downloaded = built without it (warning)

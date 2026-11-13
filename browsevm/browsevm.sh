@@ -7,10 +7,13 @@
 # build: Fedora minimal + cage + Firefox from browsevm.ks, network "browse" (section
 # browsevm), Firefox floor policy = browsers/firefox/policies.json + uBlock Origin
 # (Fedora package, force-installed) + Mullvad Browser Extension (signed xpi from
-# addons.mozilla.org, fetched at build, force-installed from the image) + no first-run
-# pages. The base image is never
-# booted for browsing: the VM (step 3) runs on a transient overlay.
-# Output: the install's serial console in /var/log/browsevm/, its BROWSEVM: lines shown.
+# cdn.mullvad.net, fetched at build, force-installed from the image) + no first-run
+# pages. The base image is never booted for browsing: the VM (step 3) runs on a
+# transient overlay.
+# Output: the install's serial console logged by virtlogd to
+# /var/log/libvirt/qemu/browsevm-build-*.serial.log, its BROWSEVM: lines shown.
+# A download speed probe runs first: under BROWSEVM_MIN_KBPS (default 200 KB/s) the build
+# stops (it would take many hours); BROWSEVM_MIN_KBPS=0 builds anyway.
 #
 set -euo pipefail
 
@@ -20,8 +23,12 @@ FEDORA="${BROWSEVM_FEDORA:-45}"
 BASE=/var/lib/libvirt/images/browsevm-base.qcow2
 BUILD=browsevm-build
 NET=browse
-LOGDIR=/var/log/browsevm
-MULLVAD_XPI_URL="https://addons.mozilla.org/firefox/downloads/latest/mullvad-vpn/latest.xpi"
+LOGDIR=/var/log/libvirt/qemu     # virtlogd writes here (virt_log_t); QEMU never opens it
+MIN_KBPS="${BROWSEVM_MIN_KBPS:-200}"
+# Mullvad ships the Firefox extension itself (no AMO listing, 404 on 2026-11-13); the xpi is
+# Mozilla-signed and Firefox checks the signature at install. New version: change it here.
+MULLVAD_EXT="${BROWSEVM_MULLVAD_EXT:-0.9.11}"
+MULLVAD_XPI_URL="https://cdn.mullvad.net/browser-extension/$MULLVAD_EXT/mullvad-browser-extension-$MULLVAD_EXT.xpi"
 MULLVAD_XPI_IN_VM=/usr/share/browsevm/mullvad-browser-extension.xpi
 V=(virsh -q -c qemu:///system)
 TMPD=""
@@ -32,10 +39,12 @@ warn() { printf '\033[33m[!]\033[0m %s\n' "$*"; }
 die()  { printf '\033[31m[x]\033[0m %s\n' "$*" >&2; exit 1; }
 
 cmd_build() {
-  local force=0 url tmp log started_net=0 state c inject_xpi
+  local force=0 url tmp log started_net=0 state c inject_xpi probe kbps host
   [[ ${1:-} == --force ]] && force=1
   [[ $EUID -eq 0 ]] || die "run with sudo"
   [[ $FEDORA =~ ^[0-9]{2}$ ]] || die "BROWSEVM_FEDORA must be a release number (e.g. 45)"
+  [[ $MIN_KBPS =~ ^[0-9]+$ ]] || die "BROWSEVM_MIN_KBPS must be a number (KB/s)"
+  [[ $MULLVAD_EXT =~ ^[0-9]+(\.[0-9]+){1,3}$ ]] || die "BROWSEVM_MULLVAD_EXT must be a version (e.g. 0.9.11)"
   for c in virt-install virsh python3 curl; do
     command -v "$c" >/dev/null || die "$c missing"
   done
@@ -53,12 +62,26 @@ cmd_build() {
   curl -fsSL --max-time 30 -o /dev/null "$url.treeinfo" || die "Fedora $FEDORA install tree not reachable: $url"
   ok "install tree: Fedora $FEDORA"
 
+  # speed probe: the install pulls ~2.5 GB (initrd, installer image, packages) through
+  # Mullvad; a slow mirror / relay turns that into many hours with a silent screen
+  probe=$(curl -fsSL --max-time 40 -o /dev/null -w '%{speed_download} %{url_effective}' \
+          "${url}images/pxeboot/vmlinuz" 2>/dev/null || true)
+  kbps=${probe%% *}
+  kbps=${kbps%%.*}
+  [[ $kbps =~ ^[0-9]+$ ]] || kbps=0
+  kbps=$(( kbps / 1024 ))
+  host=$(sed -E 's|^[^ ]* https?://([^/]+)/.*|\1|' <<<"$probe")
+  ok "speed probe: ${kbps} KB/s from ${host:-?} (about $(( kbps > 0 ? 2500 * 1024 / kbps / 60 : 0 )) min for 2.5 GB)"
+  if (( kbps < MIN_KBPS )); then
+    die "too slow (< $MIN_KBPS KB/s): other Mullvad relay or no multihop / DAITA for the build, then rerun; BROWSEVM_MIN_KBPS=0 builds anyway"
+  fi
+
   tmp=$(mktemp -d)
   TMPD=$tmp
   sed "s/@FEDORA@/$FEDORA/g" "$HERE/browsevm.ks" > "$tmp/browsevm.ks"
 
-  # Mullvad Browser Extension: Mozilla-signed xpi from AMO (Firefox checks the signature
-  # at install); its add-on ID comes from the xpi's own manifest
+  # Mullvad Browser Extension: Mozilla-signed xpi from Mullvad's CDN (Firefox checks the
+  # signature at install); its add-on ID comes from the xpi's own manifest
   if curl -fsSL --max-time 60 -o "$tmp/mullvad-browser-extension.xpi" "$MULLVAD_XPI_URL"; then
     ok "Mullvad Browser Extension downloaded ($(sha256sum "$tmp/mullvad-browser-extension.xpi" | cut -c1-16)...)"
   else
@@ -97,10 +120,9 @@ PY
   inject_xpi=()
   [[ -f $tmp/mullvad-browser-extension.xpi ]] &&
     inject_xpi=(--initrd-inject "$tmp/mullvad-browser-extension.xpi")
-  install -d -m 0750 "$LOGDIR"
-  log="$LOGDIR/build-$(date +%Y%m%d-%H%M%S).log"
+  log="$LOGDIR/$BUILD-$(date +%Y%m%d-%H%M%S).serial.log"
 
-  ok "installing (unattended, 15-40 min, packages through Mullvad) - serial log: $log"
+  ok "installing (unattended, packages through Mullvad) - serial log: $log"
   if ! virt-install --connect qemu:///system --name "$BUILD" \
       --osinfo detect=on,require=off \
       --memory 4096 --vcpus 2 \
@@ -110,8 +132,8 @@ PY
       --initrd-inject "$tmp/browsevm.ks" --initrd-inject "$tmp/browsevm-policies.json" \
       "${inject_xpi[@]}" \
       --extra-args "inst.ks=file:/browsevm.ks inst.text console=ttyS0" \
-      --graphics none --serial "file,path=$log" \
-      --noautoconsole --noreboot --wait 120 >/dev/null; then
+      --graphics none --serial "pty,log.file=$log,log.append=off" \
+      --noautoconsole --noreboot --wait 300 >/dev/null; then
     warn "virt-install failed or timed out - last lines of $log:"
     tail -n 25 "$log" 2>/dev/null || true
     "${V[@]}" destroy "$BUILD" >/dev/null 2>&1 || true
