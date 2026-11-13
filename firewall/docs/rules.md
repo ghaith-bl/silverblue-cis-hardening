@@ -20,8 +20,9 @@ rate limit   10/min burst 20 per rule (noise: 6/min burst 10) -> counters are ex
 | set | members | meaning |
 |---|---|---|
 | `if_vpn` | wg0-mullvad | VPN tunnel (Mullvad WireGuard) |
-| `if_trusted` | lo, wg0-mullvad, virbr0 | egress allowed, minus never-leave rules |
-| `if_vm` | virbr0 | libvirt bridges |
+| `if_trusted` | lo, wg0-mullvad, virbr0, virbr-browse | egress allowed, minus never-leave rules |
+| `if_vm` | virbr0, virbr-browse | libvirt bridges |
+| `if_vm_iso` | virbr-browse | bridges kept apart: tunnel only, no flow to / from another bridge (browsevm) |
 | (none) | wifi, ethernet, anything new | uplink - router + tunnel transport only |
 
 ## Dynamic sets
@@ -89,11 +90,12 @@ observe-log.md (2026-11-01, 2026-11-05).
 | # | comment | match | action | prefix |
 |---|---|---|---|---|
 | 1 | fwd_est | ct established,related | accept | - |
-| 2 | fwd_vm_new | virbr0 -> wg0-mullvad, ct new | accept + log | HFW-FWD-VM-NEW |
-| 3 | fwd_vm_vpn | virbr0 -> wg0-mullvad | accept | - |
-| 4 | fwd_vm_cross | virbr0 -> virbr0 | accept | - |
-| 5 | fwd_vm_lan | virbr0 -> anything else (LAN, uplink) | deny | HFW-FWD-VM-LAN |
-| 6 | fwd_in | any other new forwarded flow | deny | HFW-FWD-IN |
+| 2 | fwd_vm_new | if_vm -> wg0-mullvad, ct new | accept + log | HFW-FWD-VM-NEW |
+| 3 | fwd_vm_vpn | if_vm -> wg0-mullvad | accept | - |
+| 4 | fwd_vm_iso | if_vm_iso -> anything else; anything -> if_vm_iso (new) | deny (counter fwd_vm_lan) | HFW-FWD-VM-LAN |
+| 5 | fwd_vm_cross | if_vm -> if_vm (virbr0 <-> virbr0) | accept | - |
+| 6 | fwd_vm_lan | if_vm -> anything else (LAN, uplink) | deny | HFW-FWD-VM-LAN |
+| 7 | fwd_in | any other new forwarded flow | deny | HFW-FWD-IN |
 
 ## input (log only - firewalld zones decide)
 

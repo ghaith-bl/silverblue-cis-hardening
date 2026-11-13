@@ -39,13 +39,19 @@ table inet hostfw {
 	set if_trusted {
 		type ifname
 		comment "egress allowed, minus never-leave rules"
-		elements = { "lo", "wg0-mullvad", "virbr0" }
+		elements = { "lo", "wg0-mullvad", "virbr0", "virbr-browse" }
 	}
 
 	set if_vm {
 		type ifname
 		comment "libvirt bridges"
-		elements = { "virbr0" }
+		elements = { "virbr0", "virbr-browse" }
+	}
+
+	set if_vm_iso {
+		type ifname
+		comment "libvirt bridges kept apart: tunnel only, never another bridge (browsevm)"
+		elements = { "virbr-browse" }
 	}
 
 	# ---------- addresses ----------
@@ -122,7 +128,7 @@ table inet hostfw {
 	counter out_share        { comment "file sharing: SMB NFS rpcbind AFP FTP TFTP" }
 	counter out_lan          { comment "host to LAN, not router/exception" }
 	counter out_leak         { comment "host to internet outside the tunnel" }
-	counter fwd_vm_lan       { comment "VM to LAN / outside the tunnel" }
+	counter fwd_vm_lan       { comment "VM to LAN / outside the tunnel / across an isolated bridge" }
 	counter fwd_in           { comment "new forwarded traffic not from a VM" }
 	counter in_noise         { comment "LAN broadcast / multicast to host" }
 	counter in_lan           { comment "new inbound from uplink (firewalld drops)" }
@@ -311,6 +317,10 @@ table inet hostfw {
 		ct state established,related accept comment "fwd_est"
 		iifname @if_vm oifname @if_vpn ct state new goto allow_fwd_vm_new comment "fwd_vm_new"
 		iifname @if_vm oifname @if_vpn accept comment "fwd_vm_vpn"
+		# isolated bridge: out only to the tunnel (above), nothing new in from another
+		# bridge (lab VMs) or the uplink. Same counter / log as fwd_vm_lan.
+		iifname @if_vm_iso goto deny_fwd_vm_lan comment "fwd_vm_iso"
+		oifname @if_vm_iso goto deny_fwd_vm_lan comment "fwd_vm_iso"
 		iifname @if_vm oifname @if_vm accept comment "fwd_vm_cross"
 		iifname @if_vm goto deny_fwd_vm_lan comment "fwd_vm_lan"
 		ct state new goto deny_fwd_in comment "fwd_in"
