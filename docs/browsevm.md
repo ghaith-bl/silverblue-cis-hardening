@@ -2,7 +2,8 @@
 
 Status: step 1 (network) in `harden-workstation.sh browsevm`; step 2 (base image) in
 `browsevm/browsevm.sh build`; step 3 (domain, unit, polkit rule, launcher) in
-`browsevm/browsevm.sh install`. Steps 4-5 not done yet.
+`browsevm/browsevm.sh install`; step 4 (checks) in `browsevm/browsevm.sh report` and the
+list below. Step 5 (README, deviations, rollback, verification) not done yet.
 
 ## Goal
 - random links never reach the daily user's files or the system
@@ -58,6 +59,9 @@ BROWSEVM_FEDORA=44 sudo -E browsevm/browsevm.sh build   # other release
   (QEMU never opens a file itself), `--noreboot`; the kickstart powers off. Build domain
   undefined after, disk kept
 - progress line every 20 s: minutes, disk size, last installer line (Ctrl+C: domain destroyed)
+- refused while the VM runs (`browsevm.service` active) or while any domain's XML names
+  the base (a running VM: its overlay's backing file; an old definition with the base as
+  its disk): stop / undefine first
 - before anything is touched: install tree reachable (6 tries, 10 s apart: a VPN that
   just reconnected), speed probe (`images/pxeboot/vmlinuz` of the tree; under
   `BROWSEVM_MIN_KBPS`, 200 KB/s, it stops), Mullvad's rpm repository reachable. Only then
@@ -79,7 +83,9 @@ BROWSEVM_FEDORA=44 sudo -E browsevm/browsevm.sh build   # other release
 - no text console on any VT: Fedora 45's console is kmscon (tty1-6), a DRM client that
   holds the display exclusively, so its login prompt was on screen instead of the kiosk
   (first start 2026-11-14). kmscon removed (or masked), `kmsconvt@` / `getty@` masked,
-  logind `NAutoVTs=0`, cage `Conflicts=` both
+  logind `NAutoVTs=0`, cage `Conflicts=` both. `serial-getty@` masked too (the install's
+  `console=ttyS0` stays on the kernel line: systemd started a login prompt on the serial
+  port of report runs)
 - browser: Mullvad Browser (the Tor Browser without Tor, made by the Tor Project with
   Mullvad; Privacy Guides' pick for anti-fingerprinting together with a VPN). Why not
   Firefox + our policy: every session here is a new profile behind the same VPN, so what
@@ -150,7 +156,9 @@ BROWSEVM_FEDORA=44 sudo -E browsevm/browsevm.sh build   # other release
 - the extension then reaches `api.mullvad.net` (proxy list) and `am.i.mullvad.net`
   (connection check) when its popup opens, like everywhere else
 - result lines `BROWSEVM:` (browser version, missing libraries, packages yes / no, SELinux,
-  zone, target, units, consoles, release) printed by the build from the serial log
+  zone, target, units, consoles, release) printed by the build from the serial log.
+  Missing libraries = `ldd` of `libxul.so` with `LD_LIBRARY_PATH` = its own directory
+  (the browser's own libraries are there; its start script sets the same path)
 - base image: `/var/lib/libvirt/images/browsevm-base.qcow2`, root 0600, never booted
   for browsing
 
@@ -250,6 +258,40 @@ sudo browsevm/browsevm.sh report     # VM off; about 3 min
   defines the domain once with a serial port (logged by virtlogd to
   `/var/log/libvirt/qemu/browsevm-report.serial.log`), starts it through the unit, prints
   the report, stops it, defines the normal domain again
+- probes (step 4): `BROWSEVM_REPORT_PROBE="<ip>:<port> ..."` puts the targets into an
+  SMBIOS OEM string of that one start (`<sysinfo type='smbios'><oemStrings>`, `<smbios
+  mode='sysinfo'/>`); the guest reads `/sys/firmware/dmi/entries/11-0/raw`. Per target one
+  TCP connect (`PROBE lateral <target> OPEN|closed|timeout`), then 30 rounds (`PROBE round
+  <n> start <epoch> mullvad-check ok|fail tcp-443 ok|fail`: `am.i.mullvad.net/connected`
+  says connected, TCP to its address without DNS). The normal domain has no OEM string:
+  nothing is probed
+- known lines, harmless: `virt/tdx: TDX not supported by the host platform` (kernel, no
+  TDX on this CPU); AVC `rtkit-daemon setsched` on `unconfined_service_t` + `Failed to
+  make thread ... RT` (the browser's audio thread is refused real-time priority because
+  the kiosk is not a user session; sound works)
+
+## Checks (step 4)
+Admin, VM off. One report run with probes, then one normal start:
+- QEMU `svirt_t` + its own MCS pair, overlay `svirt_image_t:<pair>` on the tmpfs, base
+  `virt_content_t` while running, root 0600 `virt_image_t` + same sha256 after, tmpfs and
+  `/run/browsevm` gone after the stop (`ps -Z`, `ls -Z`, `findmnt`, `sha256sum`)
+- no clipboard: live XML has `<clipboard copypaste='no'/>`, `<filetransfer
+  enable='no'/>`, no `<channel>`, no `<redirdev>`, USB controller `none`; QEMU's
+  `-spice` has `disable-copy-paste=on`, `disable-agent-file-xfer=on`; no `spicevmc` /
+  `vdagent` on its command line. In the guest: no spice-vdagent (`pkg spice-vdagent no`)
+- lab VMs / LAN / host unreachable: probes to the host on `virbr-browse` (22), the host on
+  `virbr0`, every running lab VM (22), the LAN gateway (80): none `OPEN`. hostfw counter
+  `fwd_vm_lan` grows (forwarded tries), `tcpdump` on `virbr0`: no packet from the
+  browse /24
+- Mullvad disconnect = no internet: the host disconnects after round 4 and connects after
+  round 10: rounds that start while disconnected all `fail fail`, rounds before `ok`, an
+  `ok` again after the connect. hostfw `fwd_vm_new` grows with the VM's flows
+- sectop: the firewall screen shows the VM's flows (`fwd_vm_new` lines from the browse
+  /24, the counter card); looked at by hand during a session
+- security level: `SCRIPT-TEST blocked`, `security_slider", 2` in `prefs.js`,
+  `NOSCRIPT-BUTTON toolbar`, screenshot = green page
+- Mullvad extension: `MULLVAD-EXT-PERMS stored`; in a session its proxy settings open
+  without a permission prompt
 
 ## Residual risk
 - QEMU / KVM escape + SELinux bypass; CPU side channels
@@ -262,5 +304,5 @@ sudo browsevm/browsevm.sh report     # VM off; about 3 min
 3. domain XML (overlay disk, removed devices, sound), unit, polkit rule, desktop file
    (done)
 4. checks: `ps -Z` (svirt_t + MCS), overlay gone after shutdown, no clipboard, sectop flows,
-   lab VM and LAN unreachable, Mullvad disconnect = no internet
+   lab VM and LAN unreachable, Mullvad disconnect = no internet (list above)
 5. README, deviations, rollback, verification rows

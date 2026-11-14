@@ -73,8 +73,9 @@ fi
 if [ -n "$mb" ]; then
   say "browser $mb"
   say "browser command $(command -v mullvad-browser || echo MISSING)"
+  # the browser's own libraries sit next to libxul (its start script sets the path)
   xul=$(rpm -ql mullvad-browser | grep -m1 '/libxul\.so$')
-  miss=$(ldd "$xul" 2>/dev/null | awk '/not found/ { print $1 }' | tr '\n' ' ')
+  miss=$(LD_LIBRARY_PATH=${xul%/*} ldd "$xul" 2>/dev/null | awk '/not found/ { print $1 }' | tr '\n' ' ')
   say "browser libraries missing: ${miss:-none}"
 else
   say "MISSING mullvad-browser"
@@ -202,14 +203,15 @@ systemctl set-default graphical.target
 # no text console on any VT: nobody can log in anyway (both accounts locked), and on
 # Fedora 45 the console (kmscon) holds the display exclusively, so it showed its login
 # prompt instead of the kiosk. Package removed if nothing needs it, units masked either
-# way, logind starts no console when a VT is switched to.
+# way, logind starts no console when a VT is switched to. No login prompt on the serial
+# port either (console=ttyS0 from the install made systemd start serial-getty there).
 kc=$(rpm -qa 'kmscon*')
 if [ -n "$kc" ] && rpm -e $kc >/dev/null 2>&1; then
   say "kmscon removed"
 else
   say "kmscon $([ -n "$kc" ] && echo "kept (needed by another package), masked" || echo "not installed")"
 fi
-systemctl mask kmsconvt@.service getty@.service >/dev/null 2>&1
+systemctl mask kmsconvt@.service getty@.service serial-getty@.service >/dev/null 2>&1
 mkdir -p /etc/systemd/logind.conf.d
 printf '[Login]\nNAutoVTs=0\nReserveVT=0\n' > /etc/systemd/logind.conf.d/browsevm.conf
 
@@ -245,7 +247,7 @@ sleep 15
   echo "-- sessions"
   loginctl list-sessions --no-legend --no-pager
   echo "-- consoles"
-  systemctl list-units --all --no-legend --no-pager 'getty*' 'kmscon*' 'autovt*' | cut -c1-110
+  systemctl list-units --all --no-legend --no-pager 'getty*' 'serial-getty*' 'kmscon*' 'autovt*' | cut -c1-110
   rpm -q kmscon
   echo "-- SELinux"
   getenforce
@@ -289,6 +291,35 @@ sleep 15
   echo "-- versions"
   rpm -q mullvad-browser cage xorg-x11-server-Xwayland kernel-core | tr '\n' ' '
   echo
+  # probes, only when the host asked for them (browsevm.sh report with
+  # BROWSEVM_REPORT_PROBE: an SMBIOS OEM string "browsevm-probe <ip>:<port> ..."):
+  # TCP to each target once (must not open: host, other bridges, LAN), then rounds of
+  # internet checks with the time, for a Mullvad disconnect done by the host meanwhile
+  pr=$(tr -c '[:print:]' '\n' < /sys/firmware/dmi/entries/11-0/raw 2>/dev/null |
+       grep -o 'browsevm-probe[0-9.: ]*' | head -n 1)
+  if [ -n "$pr" ]; then
+    echo "-- probes (asked for by the host)"
+    for t in ${pr#browsevm-probe}; do
+      ip=${t%:*}; port=${t##*:}
+      t0=$(date +%s%N)
+      timeout 4 bash -c "exec 3<>/dev/tcp/$ip/$port" 2>/dev/null
+      rc=$?
+      case $rc in 0) r=OPEN ;; 124) r=timeout ;; *) r=closed ;; esac
+      echo "PROBE lateral $t $r $(( ($(date +%s%N) - t0) / 1000000 )) ms"
+    done
+    mip=$(getent ahostsv4 am.i.mullvad.net | awk 'NR == 1 { print $1 }')
+    echo "PROBE internet address of am.i.mullvad.net: ${mip:-none}"
+    for n in $(seq "${BROWSEVM_PROBE_ROUNDS:-30}"); do
+      st=$(date +%s)
+      a=fail
+      curl -fsS --max-time 4 https://am.i.mullvad.net/connected 2>/dev/null | grep 'You are connected' >/dev/null && a=ok
+      b=fail
+      [ -n "$mip" ] && timeout 3 bash -c "exec 3<>/dev/tcp/$mip/443" 2>/dev/null && b=ok
+      echo "PROBE round $n start $st mullvad-check $a tcp-443 $b"
+      sleep 2
+    done
+    echo "PROBE done"
+  fi
   echo "BROWSEVM-REPORT end"
 } > /dev/ttyS0 2>&1
 REPORT
@@ -405,7 +436,7 @@ say "selinux $(sed -n 's/^SELINUX=//p' /etc/selinux/config)"
 say "firewall default zone $(firewall-offline-cmd --get-default-zone)"
 say "default target $(systemctl get-default)"
 say "cage unit $(systemctl is-enabled cage@tty1.service)"
-say "consoles kmsconvt@ $(systemctl is-enabled kmsconvt@tty1.service 2>&1 | tail -n 1), getty@ $(systemctl is-enabled getty@tty1.service 2>&1 | tail -n 1)"
+say "consoles kmsconvt@ $(systemctl is-enabled kmsconvt@tty1.service 2>&1 | tail -n 1), getty@ $(systemctl is-enabled getty@tty1.service 2>&1 | tail -n 1), serial-getty@ $(systemctl is-enabled serial-getty@ttyS0.service 2>&1 | tail -n 1)"
 say "report unit $(systemctl is-enabled browsevm-report.service 2>&1 | tail -n 1), report mode unit $(systemctl is-enabled browsevm-reportmode.service 2>&1 | tail -n 1), test page socket $(systemctl is-enabled browsevm-jstest.socket 2>&1 | tail -n 1)"
 say "kiosk script $(test -x /usr/local/bin/browsevm-kiosk && echo present || echo MISSING)"
 say "release $(sed -n 's/^PRETTY_NAME=//p' /etc/os-release)"

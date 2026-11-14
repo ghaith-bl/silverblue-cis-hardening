@@ -37,6 +37,9 @@
 # report defines the domain once with a serial port logged by virtlogd, starts it through
 # browsevm.service, prints what the guest wrote, stops it and puts the domain back.
 # BROWSEVM_REPORT_SHOT=<file> also saves a screenshot before the stop.
+# BROWSEVM_REPORT_PROBE="<ip>:<port> ..." also hands the guest probe targets (SMBIOS OEM
+# string of this one start): it tries TCP to each (none may open), then 30 rounds of
+# internet checks with their start time (for a Mullvad disconnect meanwhile).
 #
 set -euo pipefail
 
@@ -88,6 +91,13 @@ cmd_build() {
     die "a $BUILD domain exists (old run?): sudo virsh destroy $BUILD; sudo virsh undefine $BUILD"
   fi
   if [[ -e $BASE ]] && ((!force)); then die "$BASE exists (--force moves it to $BASE.old)"; fi
+  if systemctl is-active --quiet browsevm.service; then
+    die "the VM is running (browsevm.service active): stop it first: sudo systemctl stop browsevm.service"
+  fi
+  c=$(domains_using_base)
+  if [[ -n $c ]]; then
+    die "domain(s) using $BASE: $c (running: stop it; an old definition with the base as its disk: sudo virsh undefine <name>, then browsevm.sh install after the build)"
+  fi
 
   # nothing is touched before the network answers (a VPN that just reconnected needs a
   # moment: 6 tries, 10 s apart)
@@ -198,6 +208,17 @@ cmd_build() {
   fi
 }
 
+# every domain (running or not) whose XML names the base image: a running browsevm (the
+# base is its overlay's backing file) or an old definition with the base as its disk
+domains_using_base() {
+  local d out=""
+  while read -r d; do
+    [[ -n $d ]] || continue
+    if "${V[@]}" dumpxml "$d" 2>/dev/null | grep -F "$BASE" >/dev/null; then out+="$d "; fi
+  done < <("${V[@]}" list --all --name 2>/dev/null)
+  printf '%s' "${out% }"
+}
+
 # root owned copy of a repo file: a root unit / a launcher never runs from a home
 put() {   # $1 mode, $2 source, $3 target
   if cmp -s "$2" "$3" && [[ $(stat -c '%a %U %G' "$3") == "${1#0} root root" ]]; then
@@ -273,10 +294,16 @@ report_restore() {
 
 cmd_report() {
   local st tmp log="$LOGDIR/$DOM-report.serial.log" shot=${BROWSEVM_REPORT_SHOT:-}
+  local probe=${BROWSEVM_REPORT_PROBE:-}
   local secs=${BROWSEVM_REPORT_SECS:-240} t0
   [[ $# -eq 0 ]] || die "report takes no option"
   [[ $EUID -eq 0 ]] || die "run with sudo"
   [[ $secs =~ ^[0-9]+$ ]] || die "BROWSEVM_REPORT_SECS must be a number"
+  if [[ -n $probe ]]; then
+    [[ $probe =~ ^([0-9]{1,3}(\.[0-9]{1,3}){3}:[0-9]{1,5})( [0-9]{1,3}(\.[0-9]{1,3}){3}:[0-9]{1,5})*$ ]] ||
+      die "BROWSEVM_REPORT_PROBE: '<ip>:<port> <ip>:<port> ...' (IPv4, one space between)"
+    (( ${#probe} <= 200 )) || die "BROWSEVM_REPORT_PROBE: 200 characters at most"
+  fi
   [[ -f $ETC/domain.xml ]] || die "$ETC/domain.xml missing: install first"
   st=$("${V[@]}" domstate "$DOM" 2>/dev/null || echo gone)
   [[ $st == "shut off" ]] || die "domain $DOM is '$st': stop it first (or install)"
@@ -287,6 +314,15 @@ cmd_report() {
   sed "s|</devices>|  <serial type='pty'>\n      <log file='$log' append='off'/>\n    </serial>\n  </devices>|" \
       "$ETC/domain.xml" > "$tmp/report.xml"
   grep "<serial type='pty'>" "$tmp/report.xml" >/dev/null || die "could not add the serial port"
+  if [[ -n $probe ]]; then
+    # the guest reads it from /sys/firmware/dmi/entries/11-0/raw (SMBIOS type 11)
+    sed -i -e "s|<os>|<os>\n    <smbios mode='sysinfo'/>|" \
+           -e "s|<devices>|<sysinfo type='smbios'>\n    <oemStrings>\n      <entry>browsevm-probe $probe</entry>\n    </oemStrings>\n  </sysinfo>\n  <devices>|" \
+           "$tmp/report.xml"
+    grep "<entry>browsevm-probe $probe</entry>" "$tmp/report.xml" >/dev/null &&
+      grep "<smbios mode='sysinfo'/>" "$tmp/report.xml" >/dev/null || die "could not add the probe targets"
+    ok "probe targets for the guest: $probe"
+  fi
 
   rm -f -- "$log"     # an old report is never taken for this start's
   trap 'report_restore; [[ -n $TMPD ]] && rm -rf "$TMPD"' EXIT
