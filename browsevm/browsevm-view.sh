@@ -47,4 +47,5 @@ started=1
 systemctl start "$UNIT" || { note "could not start $UNIT (journalctl -u $UNIT)"; exit 1; }
 [[ -S $SOCK && -w $SOCK ]] || { note "no access to $SOCK"; exit 1; }
 
-remote-viewer --title browsevm "spice+unix://$SOCK" 9>&-
+# no USB redirection from this side either (the VM has no USB controller)
+remote-viewer --title browsevm --spice-disable-usbredir "spice+unix://$SOCK" 9>&-

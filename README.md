@@ -114,6 +114,7 @@ sudo browsevm/browsevm.sh build       # browsevm step 2: base image (unattended 
 sudo DAILY_USER=<daily> browsevm/browsevm.sh install
                                       # browsevm step 3: domain, unit, polkit rule, launcher
                                       # (needs virt-viewer layered); then "browsevm" in the app grid
+sudo browsevm/browsevm.sh report      # the kiosk's own state (one start with a serial port)
 sudo rpm-ostree install usbguard && systemctl reboot
 sudo ./harden-workstation.sh usbguard # run 1 starts it: test keyboard, new device blocked,
                                       # sudo usb-allow-storage; run 2 enables it

@@ -1,10 +1,13 @@
 <!--
   browsevm: domain of the throwaway browsing VM (docs/browsevm.md).
-  "browsevm.sh install" fills @BASE@, @NET@, @SOCK@ and defines it (qemu:///system).
+  "browsevm.sh install" fills @RUNIMG@, @NET@, @SOCK@ and defines it (qemu:///system).
 
-  disk     the base image with <transient/>: libvirt puts an overlay on top at start
-           (<base>.TRANSIENT-browsevm) and deletes it when the VM stops. Every start is
-           clean.
+  disk     a qcow2 overlay on the base image, made new by browsevm-ctl at every start
+           and deleted at stop: every start is clean. The base is only its backing
+           file, so libvirt labels it read-only for the VM (virt_content_t): a QEMU
+           process that was taken over cannot change the base for the next start.
+           (<transient/> on the base was not used: there the base keeps the VM's
+           read-write label, svirt_image_t + its MCS pair, while it runs.)
   display  SPICE on a unix socket only (no TCP, no GL), copy / paste and file transfer
            off; no spicevmc / vdagent channel at all. virtio tablet = the pointer
            follows the viewer window without an agent.
@@ -45,9 +48,8 @@
   <devices>
     <disk type='file' device='disk'>
       <driver name='qemu' type='qcow2'/>
-      <source file='@BASE@'/>
+      <source file='@RUNIMG@'/>
       <target dev='vda' bus='virtio'/>
-      <transient/>
     </disk>
     <controller type='usb' model='none'/>
     <interface type='network'>

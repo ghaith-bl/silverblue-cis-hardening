@@ -6,13 +6,14 @@
 #                                        unattended install of the base image
 #   sudo DAILY_USER=<daily user> browsevm/browsevm.sh install
 #                                        domain, start / stop unit, polkit rule, launcher
+#   sudo browsevm/browsevm.sh report     one start with a serial port: the kiosk's own state
 #
 # build: Fedora minimal + cage + Firefox from browsevm.ks, network "browse" (section
 # browsevm), Firefox floor policy = browsers/firefox/policies.json + uBlock Origin
 # (Fedora package, force-installed) + Mullvad Browser Extension (signed xpi from
 # cdn.mullvad.net, fetched at build, force-installed from the image) + no first-run
 # pages. The base image is never booted for browsing: the VM (step 3) runs on a
-# transient overlay.
+# throwaway overlay.
 # --iso: installer (kernel, initrd, stage2) from a local Fedora Everything netinst ISO
 # (needs xorriso), packages still from the mirrors. Without it: all from the network tree.
 # Output: the install's serial console logged by virtlogd to
@@ -21,12 +22,20 @@
 # A download speed probe runs first: under BROWSEVM_MIN_KBPS (default 200 KB/s) the build
 # stops (it would take many hours); BROWSEVM_MIN_KBPS=0 builds anyway.
 #
-# install: defines the domain "browsevm" from domain.xml (the base image as a
-# <transient/> disk, SPICE on a unix socket, no clipboard / USB / shares / agent), installs
+# install: defines the domain "browsevm" from domain.xml (disk = an overlay on the base
+# image that browsevm-ctl makes at start and deletes at stop, the base read-only for the
+# VM; SPICE on a unix socket, no clipboard / USB / shares / agent), installs
 # browsevm-ctl (root, run by browsevm.service only), browsevm.service (never enabled), a
 # polkit rule (DAILY_USER may start / stop that unit, nothing else), /usr/local/bin/browsevm
 # (start + remote-viewer + stop when the window closes) and its desktop entry. The daily
 # user gets no libvirt access. Run again after a change here; the VM must be off.
+#
+# report: nobody can log in to the VM (no shell, no ssh, no agent). The image has a small
+# unit that writes the kiosk's state (cage, Firefox, SELinux, consoles, network, errors)
+# to the first serial port; the browsing domain has none, so nothing is ever sent.
+# report defines the domain once with a serial port logged by virtlogd, starts it through
+# browsevm.service, prints what the guest wrote, stops it and puts the domain back.
+# BROWSEVM_REPORT_SHOT=<file> also saves a screenshot before the stop.
 #
 set -euo pipefail
 
@@ -34,6 +43,7 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO=$(dirname "$HERE")
 FEDORA="${BROWSEVM_FEDORA:-45}"
 BASE=/var/lib/libvirt/images/browsevm-base.qcow2
+RUNIMG=/var/lib/libvirt/images/browsevm-run.qcow2    # the VM's disk (same paths in browsevm-ctl.sh)
 BUILD=browsevm-build
 DOM=browsevm
 NET=browse
@@ -254,7 +264,7 @@ cmd_install() {
       warn "$user is in group $f: the VM is meant for a user without it"
     fi
   done
-  for f in virsh systemctl; do
+  for f in virsh systemctl qemu-img; do
     command -v "$f" >/dev/null || die "$f missing"
   done
   for f in domain.xml browsevm-ctl.sh browsevm-view.sh browsevm.service 60-browsevm.rules browsevm.desktop; do
@@ -271,7 +281,7 @@ cmd_install() {
   install -d -m 0755 "$ETC" /usr/local/share/applications
 
   # domain: the file libvirt got is kept in $ETC (what to look at, what to define again)
-  sed -e "s|@BASE@|$BASE|" -e "s|@NET@|$NET|" -e "s|@SOCK@|$SOCK|" "$HERE/domain.xml" > "$tmp/domain.xml"
+  sed -e "s|@RUNIMG@|$RUNIMG|" -e "s|@NET@|$NET|" -e "s|@SOCK@|$SOCK|" "$HERE/domain.xml" > "$tmp/domain.xml"
   if grep '@[A-Z]*@' "$tmp/domain.xml" >/dev/null; then die "domain.xml: a field was not filled"; fi
   put 0644 "$tmp/domain.xml" "$ETC/domain.xml"
   if [[ $st != gone ]]; then
@@ -279,7 +289,7 @@ cmd_install() {
   fi
   "${V[@]}" define --validate "$ETC/domain.xml" >/dev/null ||
     die "virsh define failed: the domain is not defined now (fix, run again)"
-  ok "domain $DOM defined (transient disk on $BASE, SPICE socket $SOCK)"
+  ok "domain $DOM defined (disk $RUNIMG = overlay on the base, SPICE socket $SOCK)"
 
   printf '%s\n' "$user" > "$tmp/view-user"
   put 0644 "$tmp/view-user" "$ETC/view-user"
@@ -296,8 +306,65 @@ cmd_install() {
   ok "$user: open 'browsevm' from the app grid (or run: browsevm); closing the window stops the VM"
 }
 
+# the normal definition back, whatever happened in cmd_report
+report_restore() {
+  systemctl stop browsevm.service >/dev/null 2>&1 || true
+  "${V[@]}" undefine "$DOM" >/dev/null 2>&1 || true
+  "${V[@]}" define "$ETC/domain.xml" >/dev/null ||
+    warn "could not define $ETC/domain.xml again: sudo DAILY_USER=<daily user> $0 install"
+}
+
+cmd_report() {
+  local st tmp log="$LOGDIR/$DOM-report.serial.log" shot=${BROWSEVM_REPORT_SHOT:-}
+  local secs=${BROWSEVM_REPORT_SECS:-110} t0
+  [[ $# -eq 0 ]] || die "report takes no option"
+  [[ $EUID -eq 0 ]] || die "run with sudo"
+  [[ $secs =~ ^[0-9]+$ ]] || die "BROWSEVM_REPORT_SECS must be a number"
+  [[ -f $ETC/domain.xml ]] || die "$ETC/domain.xml missing: install first"
+  st=$("${V[@]}" domstate "$DOM" 2>/dev/null || echo gone)
+  [[ $st == "shut off" ]] || die "domain $DOM is '$st': stop it first (or install)"
+  if systemctl is-active --quiet browsevm.service; then die "browsevm.service is active: stop it first"; fi
+
+  tmp=$(mktemp -d)
+  TMPD=$tmp
+  sed "s|</devices>|  <serial type='pty'>\n      <log file='$log' append='off'/>\n    </serial>\n  </devices>|" \
+      "$ETC/domain.xml" > "$tmp/report.xml"
+  grep "<serial type='pty'>" "$tmp/report.xml" >/dev/null || die "could not add the serial port"
+
+  rm -f -- "$log"     # an old report is never taken for this start's
+  trap 'report_restore; [[ -n $TMPD ]] && rm -rf "$TMPD"' EXIT
+  trap 'exit 130' INT TERM
+  "${V[@]}" undefine "$DOM" >/dev/null || die "virsh undefine $DOM failed"
+  "${V[@]}" define --validate "$tmp/report.xml" >/dev/null || die "virsh define (with serial) failed"
+  systemctl start browsevm.service || die "browsevm.service did not start (journalctl -u browsevm.service)"
+  ok "started with a serial port - the guest writes its report about 60 s after boot"
+  t0=$SECONDS
+  while (( SECONDS - t0 < secs )); do
+    if grep -a 'BROWSEVM-REPORT end' "$log" >/dev/null 2>&1; then break; fi
+    sleep 10
+    printf '  %3d s  waiting for the report\n' $(( SECONDS - t0 ))
+  done
+  if [[ -n $shot ]]; then
+    if "${V[@]}" screenshot "$DOM" "$shot" >/dev/null 2>&1; then ok "screenshot: $shot"
+    else warn "screenshot failed"; fi
+  fi
+  echo
+  if grep -a 'BROWSEVM-REPORT end' "$log" >/dev/null 2>&1; then
+    sed -n '/BROWSEVM-REPORT begin/,/BROWSEVM-REPORT end/p' "$log" | tr -d '\r'
+  else
+    warn "no complete report in $secs s - what the serial port got:"
+    tail -n 40 "$log" 2>/dev/null | tr -d '\r' || true
+  fi
+  echo
+  report_restore
+  trap '[[ -n $TMPD ]] && rm -rf "$TMPD"' EXIT
+  trap - INT TERM
+  ok "stopped, normal domain (no serial port) defined again"
+}
+
 case "${1:-}" in
   build)   shift; cmd_build "$@" ;;
   install) shift; cmd_install "$@" ;;
-  *)       sed -n '3,8p' "$0"; exit 2 ;;
+  report)  shift; cmd_report "$@" ;;
+  *)       sed -n '3,9p' "$0"; exit 2 ;;
 esac

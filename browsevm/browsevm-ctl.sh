@@ -6,18 +6,23 @@
 # browsevm.service only: the daily user starts / stops that unit (polkit rule) and never
 # talks to libvirt itself (libvirt access = root).
 #
-#   browsevm-ctl start   network "browse" up, /run/browsevm for the SPICE socket,
-#                        virsh start, socket handed to the viewing user (group, 0660)
-#   browsevm-ctl stop    virsh shutdown, destroy after STOP_SECS, network down,
+#   browsevm-ctl start   new empty overlay on the base image, network "browse" up,
+#                        /run/browsevm for the SPICE socket, virsh start, socket handed
+#                        to the viewing user (group, 0660, the VM's MCS pair)
+#   browsevm-ctl stop    virsh shutdown, destroy after STOP_SECS, overlay deleted, base
+#                        image back to root 0600 + its file context, network down,
 #                        /run/browsevm removed
 #
-# The disk is <transient/>: libvirt deletes the overlay when the VM stops, shut down or
-# destroyed, so nothing of a session is left.
+# The base image is never the VM's disk: it is the backing file of the overlay, which
+# libvirt labels virt_content_t (read-only for every VM process). Whatever a session
+# wrote is in the overlay, and the overlay is deleted.
 #
 set -uo pipefail
 
 DOM=browsevm
 NET=browse
+BASE=/var/lib/libvirt/images/browsevm-base.qcow2   # same paths in browsevm.sh
+RUNIMG=/var/lib/libvirt/images/browsevm-run.qcow2
 RUN=/run/browsevm
 SOCK=$RUN/spice.sock
 VIEW_USER_FILE=/etc/browsevm/view-user   # one line: the user who may view (written by install)
@@ -33,6 +38,8 @@ die() { printf 'browsevm-ctl: %s\n' "$*" >&2; exit 1; }
 state() { "${V[@]}" domstate "$DOM" 2>/dev/null || echo gone; }
 
 net_active() { [[ $("${V[@]}" net-info "$NET" 2>/dev/null | sed -n 's/^Active: *//p') == yes ]]; }
+
+selinux_on() { command -v selinuxenabled >/dev/null && selinuxenabled; }
 
 # another running domain on the network (a base image build): the network stays up
 net_used_by_others() {
@@ -53,16 +60,37 @@ view_gid() {
   id -g "$user" 2>/dev/null || die "$VIEW_USER_FILE: no such user"
 }
 
-# the socket is made by QEMU (owner qemu, 0775 minus the dir): group = the viewing user's
-# own group, 0660. Nobody else gets past the directory (0750).
+# the base image while no VM runs: root 0600, the file context of its directory
+# (virt_image_t). libvirt gives a backing file to QEMU's user for the run (read-only by
+# its label) and does not take it back at stop.
+base_at_rest() {
+  [[ -f $BASE ]] || return 0
+  chown root:root "$BASE" && chmod 0600 "$BASE"
+  if selinux_on; then restorecon -F "$BASE" 2>/dev/null || true; fi
+}
+
+# the socket is made by QEMU (owner qemu): group = the viewing user's own group, 0660.
+# Nobody else gets past the directory (0750). Directory and socket then get the MCS pair
+# of this VM, like its disk: the QEMU process of another VM (same Unix user, other pair)
+# cannot reach this VM's screen and keyboard.
 hand_over() {
-  local gid=$1 i
+  local gid=$1 i label level
   for ((i = 0; i < SOCK_WAIT; i++)); do
     [[ -S $SOCK ]] && break
     sleep 0.5
   done
   [[ -S $SOCK ]] || return 1
-  chgrp "$gid" "$SOCK" && chmod 0660 "$SOCK"
+  chgrp "$gid" "$SOCK" || return 1
+  chmod 0660 "$SOCK" || return 1
+  if selinux_on; then
+    label=$("${V[@]}" dominfo "$DOM" 2>/dev/null | awk '/^Security label:/ { print $3 }')
+    level=${label#*:*:*:}
+    if [[ $level =~ ^s0:c[0-9]+,c[0-9]+$ ]]; then
+      chcon -l "$level" "$RUN" "$SOCK" || say "warning: MCS pair $level not set on $RUN"
+    else
+      say "warning: no MCS pair in the domain's label '$label': $RUN stays s0"
+    fi
+  fi
 }
 
 down() {
@@ -70,6 +98,8 @@ down() {
     "${V[@]}" net-destroy "$NET" >/dev/null && say "network $NET stopped"
   fi
   rm -rf -- "$RUN"
+  rm -f -- "$RUNIMG"
+  base_at_rest
 }
 
 cmd_start() {
@@ -84,9 +114,16 @@ cmd_start() {
     gone)       die "domain $DOM missing: browsevm.sh install" ;;
     *)          die "domain state '$st': stop it first" ;;
   esac
+  [[ -f $BASE ]] || die "$BASE missing: browsevm.sh build"
+
+  # a new empty overlay: the VM's only writable disk. A leftover (host crash) goes first.
+  rm -f -- "$RUNIMG"
+  base_at_rest
+  ( umask 077; qemu-img create -q -f qcow2 -F qcow2 -b "$BASE" "$RUNIMG" ) ||
+    { rm -f -- "$RUNIMG"; die "qemu-img could not create $RUNIMG"; }
 
   if ! net_active; then
-    "${V[@]}" net-start "$NET" >/dev/null || die "network $NET did not start"
+    "${V[@]}" net-start "$NET" >/dev/null || { down; die "network $NET did not start"; }
     say "network $NET started"
   fi
 
@@ -94,7 +131,7 @@ cmd_start() {
   # svirt_t may create sockets in. Group = the viewing user (search only).
   rm -rf -- "$RUN"
   install -d -m 0750 -o "$QEMU_USER" -g "$gid" "$RUN" || { down; die "could not create $RUN"; }
-  if command -v selinuxenabled >/dev/null && selinuxenabled; then
+  if selinux_on; then
     chcon -t "$SOCK_TYPE" "$RUN" || { down; die "chcon $SOCK_TYPE $RUN failed"; }
   fi
 
@@ -107,7 +144,7 @@ cmd_start() {
     down
     die "no SPICE socket $SOCK after $((SOCK_WAIT / 2)) s"
   fi
-  say "started (clean overlay), socket $SOCK"
+  say "started (new overlay), socket $SOCK"
 }
 
 cmd_stop() {
@@ -123,9 +160,12 @@ cmd_stop() {
       "${V[@]}" destroy "$DOM" >/dev/null 2>&1
       say "no shutdown in $STOP_SECS s: destroyed"
     fi
+    st=$(state)
+    # still alive: its disk and its base are left alone
+    [[ $st == "shut off" || $st == gone ]] || die "domain is still '$st': not cleaned up"
   fi
   down
-  say "stopped (overlay deleted by libvirt)"
+  say "stopped (overlay deleted)"
 }
 
 [[ $EUID -eq 0 ]] || die "run as root (by browsevm.service)"

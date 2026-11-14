@@ -1,12 +1,19 @@
-// browsevm (docs/browsevm.md): the daily user may start / stop browsevm.service from
-// a local, active session. Nothing else: no other unit, no other verb (restart, enable,
-// ...), no libvirt access (the libvirt group = root).
+// browsevm (docs/browsevm.md): the daily user may start browsevm.service from a local,
+// active session, and stop it from anywhere (logout, a session that is closing: a stop
+// is never the risk). Nothing else: no other unit, no other verb (restart, enable, ...),
+// no libvirt access (the libvirt group = root).
 // "browsevm.sh install" writes this to /etc/polkit-1/rules.d with @USER@ filled in.
 polkit.addRule(function(action, subject) {
-    if (action.id == "org.freedesktop.systemd1.manage-units" &&
-        action.lookup("unit") == "browsevm.service" &&
-        (action.lookup("verb") == "start" || action.lookup("verb") == "stop") &&
-        subject.user == "@USER@" && subject.local && subject.active) {
+    if (action.id != "org.freedesktop.systemd1.manage-units" ||
+        action.lookup("unit") != "browsevm.service" ||
+        subject.user != "@USER@") {
+        return polkit.Result.NOT_HANDLED;
+    }
+    if (action.lookup("verb") == "stop") {
         return polkit.Result.YES;
     }
+    if (action.lookup("verb") == "start" && subject.local && subject.active) {
+        return polkit.Result.YES;
+    }
+    return polkit.Result.NOT_HANDLED;
 });
