@@ -43,7 +43,7 @@ warn() { printf '\033[33m[!]\033[0m %s\n' "$*"; }
 die()  { printf '\033[31m[x]\033[0m %s\n' "$*" >&2; exit 1; }
 
 cmd_build() {
-  local force=0 iso="" url tmp log started_net=0 state c inject_xpi probe kbps host
+  local force=0 iso="" url tmp log started_net=0 state c probe kbps host
   local location label vi rc t0 size last extra
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -96,7 +96,6 @@ cmd_build() {
 
   tmp=$(mktemp -d)
   TMPD=$tmp
-  sed "s/@FEDORA@/$FEDORA/g" "$HERE/browsevm.ks" > "$tmp/browsevm.ks"
 
   # Mullvad Browser Extension: Mozilla-signed xpi from Mullvad's CDN (Firefox checks the
   # signature at install); its add-on ID comes from the xpi's own manifest
@@ -132,12 +131,30 @@ json.dump(d, open(dst, "w"), indent=2)
 PY
   ok "Firefox policy written (repo floor + extensions above + no first-run pages)"
 
+  # kickstart: release, policy and extension URL + hash written into it (only the
+  # kickstart survives the installer's switch_root, injected files do not)
+  python3 -I - "$HERE/browsevm.ks" "$tmp/browsevm.ks" "$FEDORA" "$tmp/browsevm-policies.json" \
+      "$tmp/mullvad-browser-extension.xpi" "$MULLVAD_XPI_URL" <<'PY'
+import hashlib, json, os, sys
+src, dst, fedora, pol, xpi, xpi_url = sys.argv[1:7]
+ks = open(src).read()
+policy = open(pol).read()
+json.loads(policy)
+assert "BROWSEVM_POLICY" not in policy
+url, sha = "", ""
+if os.path.exists(xpi):
+    url, sha = xpi_url, hashlib.sha256(open(xpi, "rb").read()).hexdigest()
+for k, v in (("@FEDORA@", fedora), ("@MULLVAD_XPI_URL@", url),
+             ("@MULLVAD_XPI_SHA256@", sha), ("@POLICY_JSON@", policy.rstrip("\n"))):
+    assert k in ks, k
+    ks = ks.replace(k, v)
+open(dst, "w").write(ks)
+PY
+  ok "kickstart written (policy inside, extension $([[ -f $tmp/mullvad-browser-extension.xpi ]] && echo "URL + sha256" || echo none))"
+
   if [[ $("${V[@]}" net-info "$NET" | sed -n 's/^Active: *//p') != yes ]]; then
     "${V[@]}" net-start "$NET" >/dev/null && started_net=1 && ok "network $NET started for the install"
   fi
-  inject_xpi=()
-  [[ -f $tmp/mullvad-browser-extension.xpi ]] &&
-    inject_xpi=(--initrd-inject "$tmp/mullvad-browser-extension.xpi")
   log="$LOGDIR/$BUILD-$(date +%Y%m%d-%H%M%S).serial.log"
   location=$url
   extra="inst.ks=file:/browsevm.ks inst.text console=ttyS0"
@@ -155,8 +172,7 @@ PY
       --disk "path=$BASE,size=12,format=qcow2,bus=virtio" \
       --network "network=$NET,model=virtio" \
       --location "$location" \
-      --initrd-inject "$tmp/browsevm.ks" --initrd-inject "$tmp/browsevm-policies.json" \
-      "${inject_xpi[@]}" \
+      --initrd-inject "$tmp/browsevm.ks" \
       --extra-args "$extra" \
       --graphics none --serial "pty,log.file=$log,log.append=off" \
       --noautoconsole --noreboot --wait 300 >"$tmp/virt-install.out" 2>&1 &

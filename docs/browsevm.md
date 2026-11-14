@@ -48,7 +48,9 @@ BROWSEVM_FEDORA=44 sudo -E browsevm/browsevm.sh build   # other release
 ```
 - `virt-install --location` (Fedora Everything tree, or `--iso` a local Everything
   netinst ISO: installer from the ISO, `inst.stage2=hd:LABEL=<volume label>`, needs
-  xorriso) + `browsevm/browsevm.ks` injected into the initrd, `--graphics none`, serial
+  xorriso) + `browsevm/browsevm.ks` injected into the initrd (the Firefox policy is written
+  inside the kickstart: other injected files are gone after the installer's switch_root),
+  `--graphics none`, serial
   console on a pty logged by virtlogd to `/var/log/libvirt/qemu/browsevm-build-*.serial.log`
   (QEMU never opens a file itself), `--noreboot`; the kickstart powers off. Build domain
   undefined after, disk kept
@@ -72,8 +74,9 @@ BROWSEVM_FEDORA=44 sudo -E browsevm/browsevm.sh build   # other release
 - Mullvad Browser Extension (beta): Mullvad ships it itself, not on addons.mozilla.org.
   The host downloads `cdn.mullvad.net/browser-extension/<v>/...xpi`
   (`BROWSEVM_MULLVAD_EXT`, default 0.9.11) at build through Mullvad, its add-on ID is read
-  from the xpi's manifest, the xpi goes into the image (`/usr/share/browsevm/`) and is
-  force-installed from there: no download at every start. The xpi is Mozilla-signed:
+  from the xpi's manifest and its sha256 written into the kickstart; `%post` downloads the
+  same URL into the image (`/usr/share/browsevm/`) and keeps it only if the sha256
+  matches; Firefox force-installs it from there: no download at every start. The xpi is Mozilla-signed:
   Firefox checks the signature at install. Shows the connection (Mullvad server, DNS),
   WebRTC toggle; its SOCKS5 proxy (other exit location) works because the VM is inside
   the host's tunnel. Optional permissions (proxy, tabs, all URLs) only if the proxy is

@@ -1,6 +1,8 @@
 # browsevm.ks - unattended install of the browsevm base image (Fedora minimal +
-# cage kiosk + Firefox). Used by browsevm.sh build: @FEDORA@ is replaced there,
-# browsevm-policies.json is injected next to this file.
+# cage kiosk + Firefox). Used by browsevm.sh build, which fills the @...@ fields:
+# release, the Firefox policy (written here: files injected into the initrd are gone
+# after the installer's switch_root, only the kickstart is carried over) and the
+# Mullvad extension URL + sha256 (downloaded in %post, checked against the host's hash).
 # Nothing here is a secret: the only user has a locked password and no sudo.
 
 text
@@ -40,17 +42,31 @@ google-noto-naskh-arabic-vf-fonts
 -plymouth
 %end
 
-# copy the injected Firefox policy into the new system (runs outside the chroot)
-%post --nochroot
-install -D -m 0644 /browsevm-policies.json "$ANA_INSTALL_PATH/etc/firefox/policies/policies.json"
-if [ -f /mullvad-browser-extension.xpi ]; then
-  install -D -m 0644 /mullvad-browser-extension.xpi \
-    "$ANA_INSTALL_PATH/usr/share/browsevm/mullvad-browser-extension.xpi"
-fi
-%end
-
 %post
 say() { echo "BROWSEVM: $*" > /dev/ttyS0; }
+
+# Firefox floor policy (built on the host from browsers/firefox/policies.json)
+mkdir -p /etc/firefox/policies
+cat > /etc/firefox/policies/policies.json <<'BROWSEVM_POLICY'
+@POLICY_JSON@
+BROWSEVM_POLICY
+chmod 0644 /etc/firefox/policies/policies.json
+
+# Mullvad Browser Extension: same file the host checked (sha256), Mozilla-signed
+xpi_url='@MULLVAD_XPI_URL@'
+xpi_sha='@MULLVAD_XPI_SHA256@'
+xpi=/usr/share/browsevm/mullvad-browser-extension.xpi
+if [ -n "$xpi_url" ]; then
+  mkdir -p /usr/share/browsevm
+  if curl -fsSL --retry 3 --max-time 120 -o "$xpi" "$xpi_url" &&
+     echo "$xpi_sha  $xpi" | sha256sum -c --quiet >/dev/null 2>&1; then
+    chmod 0644 "$xpi"
+    say "mullvad xpi sha256 ok"
+  else
+    rm -f "$xpi"
+    say "MISSING mullvad xpi (download or sha256 failed)"
+  fi
+fi
 
 # kiosk: cage on tty1 as user web, Firefox full screen, restarted when closed.
 # Unit from cage's wiki "Starting Cage on boot with systemd". pixman = CPU renderer.
