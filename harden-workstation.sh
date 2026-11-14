@@ -52,6 +52,8 @@ MULLVAD_VM_BRIDGES=(virbr0 virbr-browse)  # kvmlan section: libvirt bridges outs
 BROWSEVM_BRIDGE="virbr-browse"  # browsevm section: bridge of libvirt network "browse" (same name as
                              # if_vm_iso in firewall/hostfw.nft and in MULLVAD_VM_BRIDGES)
 BROWSEVM_NET="192.168.123"   # browsevm section: /24 of that network (host .1, DHCP .10-.20)
+SVIRT_OFF_BOOLEANS=(virt_use_usb virt_use_nfs)  # svirt section: SELinux booleans turned off (what
+                             # every VM process may reach on the host); () = leave them
 USBGUARD_BLOCK_BLUETOOTH="yes" # usbguard section: USB Bluetooth adapters blocked in the rules
                              # generated from the devices present ("no" = allowed like the rest)
 APP_UNITS=(brave-browser)    # appunit section: desktop ids started as their own service (launcher
@@ -70,7 +72,7 @@ else
 fi
 
 BACKUP_ROOT="/var/backups/hardening/$(date +%Y%m%d-%H%M%S)"
-SECTIONS=(sysctl modules coredump journald gnome sudo pam pwage su accounts services loopback cron sshd auditd audit-rules perms mic netprivacy mullvad kvmlan browsevm usbguard appunit time kargs)
+SECTIONS=(sysctl modules coredump journald gnome sudo pam pwage su accounts services loopback cron sshd auditd audit-rules perms mic netprivacy mullvad kvmlan browsevm svirt usbguard appunit time kargs)
 
 # -----------------------------------------------------------------------------
 # Helpers
@@ -1149,6 +1151,46 @@ EOF
   log "start for a test: sudo virsh net-start $net (stop: sudo virsh net-destroy $net)"
 }
 
+## Not CIS. sVirt = what the QEMU process of a VM may touch on the host (docs/browsevm.md,
+## "SELinux (host)"; NIST SP 800-53 AC-6, SC-39). SELinux booleans that widen it are turned
+## off (SVIRT_OFF_BOOLEANS: host USB devices, files on NFS; no VM here uses either), and
+## libvirt refuses a domain that asks to run without sVirt (qemu.conf
+## security_require_confined = 1; libvirt's default is 0 = <seclabel type='none'/> works).
+sec_svirt() {
+  local conf=/etc/libvirt/qemu.conf b u on=()
+  if ! command -v getsebool >/dev/null || ! command -v selinuxenabled >/dev/null || ! selinuxenabled; then
+    warn "SELinux off or its tools missing - skipped"; return 0
+  fi
+  for b in "${SVIRT_OFF_BOOLEANS[@]}"; do
+    [[ $b =~ ^virt_[a-z_]+$ ]] || { warn "SVIRT_OFF_BOOLEANS: '$b' is not a virt_ boolean - left"; continue; }
+    case $(getsebool "$b" 2>/dev/null) in
+      *"--> on")  on+=("$b=off") ;;
+      *"--> off") log "boolean $b is off" ;;
+      *)          warn "boolean $b not known to this policy - left" ;;
+    esac
+  done
+  if (( ${#on[@]} )); then
+    # one policy rebuild for all of them (-P: kept over reboots)
+    if setsebool -P "${on[@]}"; then log "booleans set (persistent): ${on[*]}"
+    else warn "setsebool -P ${on[*]} failed"; fi
+  fi
+
+  [[ -f $conf ]] || { warn "$conf missing (libvirt QEMU driver not installed?) - skipped"; return 0; }
+  if grep -Eq '^[[:space:]]*security_require_confined[[:space:]]*=[[:space:]]*1[[:space:]]*$' "$conf"; then
+    log "$conf: security_require_confined = 1"
+  else
+    backup "$conf"
+    set_kv "$conf" security_require_confined 1
+    log "$conf: security_require_confined = 1 (a domain without sVirt is refused)"
+    # the daemon reads qemu.conf at start; running VMs survive its restart
+    for u in virtqemud.service libvirtd.service; do
+      if systemctl is-active --quiet "$u"; then
+        if systemctl try-restart "$u"; then log "$u restarted"; else warn "$u restart failed"; fi
+      fi
+    done
+  fi
+}
+
 ## Not CIS. USBGuard: only devices in rules.conf work, locked or not, before login too.
 ## A flash drive: sudo usb-allow-storage (installed here) allows ONE blocked device whose
 ## every interface is mass storage, until it is unplugged. GNOME usb-protection off (it
@@ -1379,6 +1421,7 @@ main() {
       mullvad)     sec_mullvad ;;
       kvmlan)      sec_kvmlan ;;
       browsevm)    sec_browsevm ;;
+      svirt)       sec_svirt ;;
       usbguard)    sec_usbguard ;;
       appunit)     sec_appunit ;;
       time)        sec_time ;;

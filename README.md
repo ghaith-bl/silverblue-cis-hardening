@@ -84,6 +84,7 @@ sudo ./harden-workstation.sh all
 | `MULLVAD_VM_BRIDGES`   | `(virbr0 virbr-browse)` | libvirt bridges outside Mullvad's LAN block (`kvmlan`); `()` = none |
 | `BROWSEVM_BRIDGE`      | `virbr-browse` | `browsevm`: bridge of network `browse` (also in hostfw `if_vm_iso` and `MULLVAD_VM_BRIDGES`) |
 | `BROWSEVM_NET`         | `192.168.123` | `browsevm`: its /24 (host .1, DHCP .10-.20) |
+| `SVIRT_OFF_BOOLEANS`   | `(virt_use_usb virt_use_nfs)` | `svirt`: SELinux booleans turned off for every VM process; `()` = leave them |
 | `USBGUARD_BLOCK_BLUETOOTH` | `yes` | USB Bluetooth adapters blocked in the generated USBGuard rules |
 | `APP_UNITS`            | `(brave-browser)` | desktop ids `appunit` starts as their own service; `()` = none |
 | `ADMIN_USER`           | `""` (env) | `accounts`: text-console admin; `""` = one account |
@@ -115,6 +116,7 @@ sudo DAILY_USER=<daily> browsevm/browsevm.sh install
                                       # browsevm step 3: domain, unit, polkit rule, launcher
                                       # (needs virt-viewer layered); then "browsevm" in the app grid
 sudo browsevm/browsevm.sh report      # the kiosk's own state (one start with a serial port)
+sudo ./harden-workstation.sh svirt    # VMs: no host USB / NFS for QEMU, unconfined domains refused
 sudo rpm-ostree install usbguard && systemctl reboot
 sudo ./harden-workstation.sh usbguard # run 1 starts it: test keyboard, new device blocked,
                                       # sudo usb-allow-storage; run 2 enables it
@@ -150,6 +152,7 @@ sudo ./harden-workstation.sh kargs    # reboot: LUKS unlock, Wi-Fi, VPN, a VM
 | `mullvad`     | not CIS: Mullvad management socket only for group `mullvad`, the admin in it | `mullvad` CLI for the admin only |
 | `kvmlan`      | not CIS: table `inet kvmlan`, Mullvad's split tunneling marks on host <-> VM packets of `MULLVAD_VM_BRIDGES` only (no accept / drop) | VM lease + host <-> VM ssh with Allow LAN off; VM internet only via the tunnel |
 | `browsevm`    | not CIS: throwaway VM for random links ([docs/browsevm.md](docs/browsevm.md)). Step 1: libvirt network `browse` (own bridge, not autostarted), firewalld zone `browsevm` + policies (to the host: DHCP + DNS only) | none until the VM exists; its traffic: tunnel only, never the LAN or a lab VM |
+| `svirt`       | not CIS: SELinux booleans `SVIRT_OFF_BOOLEANS` off (a VM's QEMU process gets no host USB device, no NFS file), `/etc/libvirt/qemu.conf` `security_require_confined = 1` (libvirt refuses a domain that asks to run without sVirt) | no USB passthrough to a VM, no VM disk on NFS |
 | `usbguard`    | not CIS: rules from the devices present, CLI root only, `usb-allow-storage`, GNOME usb-protection off. Run twice: start + test, then enable | only known devices work, locked or not; flash drive: `sudo usb-allow-storage` |
 | `appunit`     | not CIS: apps in `APP_UNITS` start as `app-<id>@<pid>.service` (Brave left GNOME Shell's cgroup) | the app in its own unit; after a Brave update run it again |
 | `time`        | chrony: NTS only (Netnod + PTB), `authselectmode require`, `minsources 2`, no pool, no DHCP NTP | no time sync without the tunnel |
