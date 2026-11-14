@@ -5,3 +5,9 @@
 
 # systemd units with an instance (org.gnome.Shell@user.service ...) look like mail addresses.
 email  *  [\w.:\\-]+@[\w.-]*\.(?:service|socket|scope|slice|target|timer|mount)
+
+# NoScript add-on ID (public, the same in every Tor / Mullvad Browser): its toolbar button
+uuid  browsevm/browsevm.ks  73a6fe31-595d-460b-a920-fcc0f8843232
+# Mullvad Browser Extension add-on ID (public, the same in every Mullvad Browser): its permissions preset
+uuid  browsevm/browsevm.ks  \{?d19a89b9-76c1-4a61-bcd4-49e8de916403\}?
+uuid  docs/browsevm.md  \{?d19a89b9-76c1-4a61-bcd4-49e8de916403\}?

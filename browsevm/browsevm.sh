@@ -31,8 +31,9 @@
 # user gets no libvirt access. Run again after a change here; the VM must be off.
 #
 # report: nobody can log in to the VM (no shell, no ssh, no agent). The image has a small
-# unit that writes the kiosk's state (cage, Firefox, SELinux, consoles, network, errors)
-# to the first serial port; the browsing domain has none, so nothing is ever sent.
+# unit that writes the kiosk's state (cage, the browser, its security level, the script
+# test page, SELinux, consoles, network, errors) to the first serial port; the browsing
+# domain has none, so nothing is ever sent.
 # report defines the domain once with a serial port logged by virtlogd, starts it through
 # browsevm.service, prints what the guest wrote, stops it and puts the domain back.
 # BROWSEVM_REPORT_SHOT=<file> also saves a screenshot before the stop.
@@ -272,7 +273,7 @@ report_restore() {
 
 cmd_report() {
   local st tmp log="$LOGDIR/$DOM-report.serial.log" shot=${BROWSEVM_REPORT_SHOT:-}
-  local secs=${BROWSEVM_REPORT_SECS:-110} t0
+  local secs=${BROWSEVM_REPORT_SECS:-240} t0
   [[ $# -eq 0 ]] || die "report takes no option"
   [[ $EUID -eq 0 ]] || die "run with sudo"
   [[ $secs =~ ^[0-9]+$ ]] || die "BROWSEVM_REPORT_SECS must be a number"
@@ -293,7 +294,7 @@ cmd_report() {
   "${V[@]}" undefine "$DOM" >/dev/null || die "virsh undefine $DOM failed"
   "${V[@]}" define --validate "$tmp/report.xml" >/dev/null || die "virsh define (with serial) failed"
   systemctl start browsevm.service || die "browsevm.service did not start (journalctl -u browsevm.service)"
-  ok "started with a serial port - the guest writes its report about 60 s after boot"
+  ok "started with a serial port - the guest writes its report 1-3 min after boot"
   t0=$SECONDS
   while (( SECONDS - t0 < secs )); do
     if grep -a 'BROWSEVM-REPORT end' "$log" >/dev/null 2>&1; then break; fi

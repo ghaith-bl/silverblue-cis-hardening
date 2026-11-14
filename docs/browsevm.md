@@ -20,7 +20,7 @@ Status: step 1 (network) in `harden-workstation.sh browsevm`; step 2 (base image
 
 ## Shape
 - guest: Fedora minimal + `cage` (Wayland kiosk) + Mullvad Browser full screen, auto login
-  of a user without sudo. The browser as shipped, no setting of ours. Nothing else
+  of a user without sudo. The browser as shipped, security level Safer. Nothing else
 - disk: base image `/var/lib/libvirt/images/browsevm-base.qcow2`, never the VM's own
   disk. The VM runs on a qcow2 overlay made new at every start, in RAM (tmpfs), gone at
   stop: every start is clean, downloads / cookies / malware gone at power off and never
@@ -84,8 +84,9 @@ BROWSEVM_FEDORA=44 sudo -E browsevm/browsevm.sh build   # other release
   Mullvad; Privacy Guides' pick for anti-fingerprinting together with a VPN). Why not
   Firefox + our policy: every session here is a new profile behind the same VPN, so what
   is left to link sessions is the browser's fingerprint, and that is what this browser
-  makes the same for all its users. So it is left as shipped (uBlock Origin and the
-  Mullvad extension come with it): no policy, no preference, no extra add-on of ours
+  makes the same for all its users. So it is left as shipped (uBlock Origin, NoScript and
+  the Mullvad extension come with it): no policy, no extra add-on of ours, one choice of
+  the browser's own: the security level (below)
 - installed in `%post` the way Mullvad documents it for Fedora: repo file from
   `repository.mullvad.net/rpm/stable/mullvad.repo`, `dnf install mullvad-browser`.
   `gpgcheck=1` is forced into the repo file and a file without a `gpgkey` line is
@@ -94,7 +95,60 @@ BROWSEVM_FEDORA=44 sudo -E browsevm/browsevm.sh build   # other release
 - X11 on cage's Xwayland: the browser's own default (the Tor Project keeps Wayland off
   in it); without Xwayland the kiosk script sets `MOZ_ENABLE_WAYLAND=1`
 - to expect: letterboxing (grey margins around the page), English for web pages asked
-  at first start, a site may break under its fingerprinting protection
+  at first start, a site may break under its fingerprinting protection, a black screen
+  for up to a minute after the start (the browser's first start is headless, below)
+
+## Security level Safer
+- the browser's own security level (shield icon), the Tor Project's three levels:
+  Standard (shipped default), Safer (JavaScript off on non-HTTPS sites; JIT off, some
+  fonts and math symbols off, audio / video click to play, everywhere), Safest (also
+  JavaScript off on every site). browsevm: Safer at every start (Safest breaks most
+  sites)
+- a site that needs JavaScript over plain http: NoScript button in the toolbar ->
+  `Temp. TRUSTED` for that site. Session only: gone when the browser closes (cage starts
+  it again) and with the VM's disk at stop. A temp-trusted site runs JavaScript with the
+  other Safer limits (no JIT: slower)
+- Safer is a level the browser offers to all its users: who uses it looks like the others
+  at Safer (a smaller crowd than Standard; the attack surface is what counts here: random
+  links, JIT bugs are a common browser exploit path)
+- how: the kiosk runs the browser with a fixed profile (`--profile
+  /home/web/.browsevm/profile`, on the VM's throwaway disk like everything else) with a
+  `user.js` (root's, read-only for the browser):
+  ```
+  user_pref("browser.security_level.security_slider", 2);   // 4 Standard, 2 Safer, 1 Safest
+  user_pref("browser.security_level.security_custom", false);
+  user_pref("extensions.hideNoScript", false);                // NoScript button shown
+  ```
+  `extensions.hideNoScript`: the Tor Project hides NoScript's button by default
+  (tor-browser#41581, MR 816); false = in the toolbar of a new profile
+- first start of every VM start is headless (`--headless about:blank`, closed with TERM
+  once `extensions.json` is written + 8 s, KILL after 20 s more): a level set before the
+  first start of a new profile was only applied after a restart (Tor forum: Tor Browser
+  12.0 `user.js` not respected on first start; tor-browser#44687 in 16.0a4 changelog:
+  security level needs a restart in a new profile). The window shows the second start
+- changing the level by hand in the VM needs the browser's restart (Privacy Guides 2025:
+  the slider is only fully applied after a restart): close the browser, cage starts it
+  again with the `user.js` level (Safer). So the level in the VM is always Safer
+- checked in every report run: a local test page over http (below) must stay green
+
+## Mullvad Browser Extension: permissions given in the image
+- shipped with the browser, on by default. Its proxy feature (Mullvad SOCKS proxy per site
+  or for the browser, only inside a Mullvad tunnel) needs optional permissions: `proxy`,
+  `tabs`, all sites (`<all_urls>`). Asked at first use, and every VM start is a new
+  profile: it would ask in every session
+- the image's profile holds `extension-preferences.json` (web, 0600):
+  ```
+  {"{d19a89b9-76c1-4a61-bcd4-49e8de916403}":{"permissions":["proxy","tabs"],"origins":["<all_urls>"]}}
+  ```
+  Firefox keeps granted optional permissions in the profile's `extension-store`; a new
+  profile takes them over once from this file (the older store's format). Firefox only
+  uses stored permissions the extension's manifest lists as optional (Mozilla bug
+  1766915)
+- the build prints the shipped extensions (`distribution/extensions/*.xpi`, the file
+  name is the add-on ID); the report prints whether the file was taken over and what
+  `extension-store` holds (`MULLVAD-EXT-PERMS stored`)
+- the extension then reaches `api.mullvad.net` (proxy list) and `am.i.mullvad.net`
+  (connection check) when its popup opens, like everywhere else
 - result lines `BROWSEVM:` (browser version, missing libraries, packages yes / no, SELinux,
   zone, target, units, consoles, release) printed by the build from the serial log
 - base image: `/var/lib/libvirt/images/browsevm-base.qcow2`, root 0600, never booted
@@ -174,12 +228,24 @@ Daily user: app grid `browsevm` (or `browsevm` in a terminal). Window closed = V
 
 ## Looking inside (report)
 ```
-sudo browsevm/browsevm.sh report     # VM off; about 2 min
+sudo browsevm/browsevm.sh report     # VM off; about 3 min
 ```
 - nobody can log in to the VM. The image's `browsevm-report.service` writes the kiosk's
-  state to the first serial port 45 s after boot: cage unit + its journal, SELinux label
-  and no_new_privs of cage / the browser, X11 or Wayland, sessions, consoles, AVC denials, network, sound
+  state to the first serial port once the test page was asked for (1-3 min after boot):
+  cage unit + its journal, SELinux label and no_new_privs of cage / the browser, X11 or
+  Wayland, sessions, consoles, AVC denials, security level, script test, network, sound
   cards, errors
+- security level: seconds of the headless first start (ended by TERM / KILL), the
+  browser's command line (`--profile`), `prefs.js` lines `security_level` /
+  `hideNoScript`, `NOSCRIPT-BUTTON toolbar` when NoScript's button is in the toolbar state
+- script test: `browsevm-reportmode.service` (only when the domain has a serial port,
+  before cage) flags the run (`/run/browsevm-report-mode`) and starts
+  `browsevm-jstest.socket` (127.0.0.1:8088, never enabled; one `DynamicUser` service per
+  request, request lines to the journal). The kiosk opens that page: green text, and a
+  script that turns it red and asks for `/js-ran`. `SCRIPT-TEST blocked` = page asked
+  for, no `/js-ran` (an http page: blocked at Safer and Safest; which one = the
+  `prefs.js` line `security_slider", 2` for Safer); `ran` = the script ran (Standard); `no-page` =
+  the browser never asked for it. The screenshot shows the page
 - the browsing domain has no serial port: the open fails, nothing is sent. `report`
   defines the domain once with a serial port (logged by virtlogd to
   `/var/log/libvirt/qemu/browsevm-report.serial.log`), starts it through the unit, prints
