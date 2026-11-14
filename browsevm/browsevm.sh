@@ -4,6 +4,8 @@
 #
 #   sudo browsevm/browsevm.sh build [--force] [--iso <netinst.iso>]
 #                                        unattended install of the base image
+#   sudo DAILY_USER=<daily user> browsevm/browsevm.sh install
+#                                        domain, start / stop unit, polkit rule, launcher
 #
 # build: Fedora minimal + cage + Firefox from browsevm.ks, network "browse" (section
 # browsevm), Firefox floor policy = browsers/firefox/policies.json + uBlock Origin
@@ -19,6 +21,13 @@
 # A download speed probe runs first: under BROWSEVM_MIN_KBPS (default 200 KB/s) the build
 # stops (it would take many hours); BROWSEVM_MIN_KBPS=0 builds anyway.
 #
+# install: defines the domain "browsevm" from domain.xml (the base image as a
+# <transient/> disk, SPICE on a unix socket, no clipboard / USB / shares / agent), installs
+# browsevm-ctl (root, run by browsevm.service only), browsevm.service (never enabled), a
+# polkit rule (DAILY_USER may start / stop that unit, nothing else), /usr/local/bin/browsevm
+# (start + remote-viewer + stop when the window closes) and its desktop entry. The daily
+# user gets no libvirt access. Run again after a change here; the VM must be off.
+#
 set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -26,7 +35,10 @@ REPO=$(dirname "$HERE")
 FEDORA="${BROWSEVM_FEDORA:-45}"
 BASE=/var/lib/libvirt/images/browsevm-base.qcow2
 BUILD=browsevm-build
+DOM=browsevm
 NET=browse
+SOCK=/run/browsevm/spice.sock    # same path in browsevm-ctl.sh and browsevm-view.sh
+ETC=/etc/browsevm                # network.xml (section browsevm), domain.xml, view-user
 LOGDIR=/var/log/libvirt/qemu     # virtlogd writes here (virt_log_t); QEMU never opens it
 MIN_KBPS="${BROWSEVM_MIN_KBPS:-200}"
 # Mullvad ships the Firefox extension itself (not on addons.mozilla.org); the xpi is
@@ -168,6 +180,7 @@ PY
   ok "progress every 20 s: minutes, disk MB, last installer line (Ctrl+C stops the build)"
   virt-install --connect qemu:///system --name "$BUILD" \
       --osinfo detect=on,require=off \
+      --machine q35 \
       --memory 4096 --vcpus 2 \
       --disk "path=$BASE,size=12,format=qcow2,bus=virtio" \
       --network "network=$NET,model=virtio" \
@@ -218,7 +231,73 @@ PY
   fi
 }
 
+# root owned copy of a repo file: a root unit / a launcher never runs from a home
+put() {   # $1 mode, $2 source, $3 target
+  if cmp -s "$2" "$3" && [[ $(stat -c '%a %U %G' "$3") == "${1#0} root root" ]]; then
+    ok "$3 up to date"
+  else
+    install -o root -g root -m "$1" "$2" "$3" || die "could not install $3"
+    restorecon -F "$3" 2>/dev/null || true
+    ok "installed $3"
+  fi
+}
+
+cmd_install() {
+  local user=${DAILY_USER:-} f st tmp
+  [[ $# -eq 0 ]] || die "install takes no option"
+  [[ $EUID -eq 0 ]] || die "run with sudo"
+  [[ -n $user ]] || die "who may open the VM? sudo DAILY_USER=<daily user> browsevm/browsevm.sh install"
+  [[ $user =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] && id "$user" >/dev/null 2>&1 || die "no such user: $user"
+  (( $(id -u "$user") >= 1000 )) || die "$user is a system account"
+  for f in wheel libvirt; do
+    if id -nG "$user" | tr ' ' '\n' | grep -x "$f" >/dev/null; then
+      warn "$user is in group $f: the VM is meant for a user without it"
+    fi
+  done
+  for f in virsh systemctl; do
+    command -v "$f" >/dev/null || die "$f missing"
+  done
+  for f in domain.xml browsevm-ctl.sh browsevm-view.sh browsevm.service 60-browsevm.rules browsevm.desktop; do
+    [[ -f $HERE/$f ]] || die "$HERE/$f missing: run from the repo"
+  done
+  "${V[@]}" net-info "$NET" >/dev/null 2>&1 || die "network $NET missing: sudo ./harden-workstation.sh browsevm"
+  [[ -f $BASE ]] || die "$BASE missing: sudo browsevm/browsevm.sh build"
+  st=$("${V[@]}" domstate "$DOM" 2>/dev/null || echo gone)
+  [[ $st == gone || $st == "shut off" ]] ||
+    die "domain $DOM is '$st': sudo systemctl stop browsevm.service, then run again"
+
+  tmp=$(mktemp -d)
+  TMPD=$tmp
+  install -d -m 0755 "$ETC" /usr/local/share/applications
+
+  # domain: the file libvirt got is kept in $ETC (what to look at, what to define again)
+  sed -e "s|@BASE@|$BASE|" -e "s|@NET@|$NET|" -e "s|@SOCK@|$SOCK|" "$HERE/domain.xml" > "$tmp/domain.xml"
+  if grep '@[A-Z]*@' "$tmp/domain.xml" >/dev/null; then die "domain.xml: a field was not filled"; fi
+  put 0644 "$tmp/domain.xml" "$ETC/domain.xml"
+  if [[ $st != gone ]]; then
+    "${V[@]}" undefine "$DOM" >/dev/null || die "virsh undefine $DOM failed"
+  fi
+  "${V[@]}" define --validate "$ETC/domain.xml" >/dev/null ||
+    die "virsh define failed: the domain is not defined now (fix, run again)"
+  ok "domain $DOM defined (transient disk on $BASE, SPICE socket $SOCK)"
+
+  printf '%s\n' "$user" > "$tmp/view-user"
+  put 0644 "$tmp/view-user" "$ETC/view-user"
+  put 0755 "$HERE/browsevm-ctl.sh" /usr/local/sbin/browsevm-ctl
+  put 0755 "$HERE/browsevm-view.sh" /usr/local/bin/browsevm
+  put 0644 "$HERE/browsevm.service" /etc/systemd/system/browsevm.service
+  systemctl daemon-reload
+  sed "s|@USER@|$user|" "$HERE/60-browsevm.rules" > "$tmp/60-browsevm.rules"
+  put 0644 "$tmp/60-browsevm.rules" /etc/polkit-1/rules.d/60-browsevm.rules
+  put 0644 "$HERE/browsevm.desktop" /usr/local/share/applications/browsevm.desktop
+
+  command -v remote-viewer >/dev/null ||
+    warn "remote-viewer missing: sudo rpm-ostree install virt-viewer, reboot"
+  ok "$user: open 'browsevm' from the app grid (or run: browsevm); closing the window stops the VM"
+}
+
 case "${1:-}" in
-  build) shift; cmd_build "$@" ;;
-  *)     sed -n '3,12p' "$0"; exit 2 ;;
+  build)   shift; cmd_build "$@" ;;
+  install) shift; cmd_install "$@" ;;
+  *)       sed -n '3,8p' "$0"; exit 2 ;;
 esac

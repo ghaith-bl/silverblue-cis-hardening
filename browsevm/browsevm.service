@@ -1,0 +1,16 @@
+# browsevm.service - the throwaway browsing VM (docs/browsevm.md)
+# Installed by "browsevm.sh install" to /etc/systemd/system. Never enabled: started on
+# demand by the daily user (polkit rule 60-browsevm.rules) through /usr/local/bin/browsevm.
+# That user gets this unit only, no libvirt access.
+
+[Unit]
+Description=browsevm: throwaway browsing VM
+After=virtqemud.socket virtnetworkd.socket libvirtd.socket
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/browsevm-ctl start
+ExecStop=/usr/local/sbin/browsevm-ctl stop
+TimeoutStartSec=60
+TimeoutStopSec=60

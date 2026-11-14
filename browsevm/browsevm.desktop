@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=browsevm
+GenericName=Throwaway browser
+Comment=Random links in a throwaway VM: nothing is kept after the window is closed
+Exec=/usr/local/bin/browsevm
+Icon=virt-viewer
+Terminal=false
+Categories=Network;
+StartupNotify=false

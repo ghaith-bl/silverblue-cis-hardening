@@ -1,0 +1,79 @@
+<!--
+  browsevm: domain of the throwaway browsing VM (docs/browsevm.md).
+  "browsevm.sh install" fills @BASE@, @NET@, @SOCK@ and defines it (qemu:///system).
+
+  disk     the base image with <transient/>: libvirt puts an overlay on top at start
+           (<base>.TRANSIENT-browsevm) and deletes it when the VM stops. Every start is
+           clean.
+  display  SPICE on a unix socket only (no TCP, no GL), copy / paste and file transfer
+           off; no spicevmc / vdagent channel at all. virtio tablet = the pointer
+           follows the viewer window without an agent.
+  sound    ich9, output codec only (no capture path into the guest), SPICE audio.
+  removed  USB controller (so no USB redirection), memory balloon, serial console,
+           guest agent channel, shared folders, smartcard.
+  machine  q35 + BIOS, the same as the build.
+-->
+<domain type='kvm'>
+  <name>browsevm</name>
+  <title>browsevm: throwaway browsing VM</title>
+  <memory unit='GiB'>4</memory>
+  <currentMemory unit='GiB'>4</currentMemory>
+  <vcpu placement='static'>2</vcpu>
+  <os>
+    <type arch='x86_64' machine='q35'>hvm</type>
+    <boot dev='hd'/>
+    <bootmenu enable='no'/>
+  </os>
+  <features>
+    <acpi/>
+    <apic/>
+    <vmport state='off'/>
+  </features>
+  <cpu mode='host-passthrough'/>
+  <clock offset='utc'>
+    <timer name='rtc' tickpolicy='catchup'/>
+    <timer name='pit' tickpolicy='delay'/>
+    <timer name='hpet' present='no'/>
+  </clock>
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>restart</on_reboot>
+  <on_crash>destroy</on_crash>
+  <pm>
+    <suspend-to-mem enabled='no'/>
+    <suspend-to-disk enabled='no'/>
+  </pm>
+  <devices>
+    <disk type='file' device='disk'>
+      <driver name='qemu' type='qcow2'/>
+      <source file='@BASE@'/>
+      <target dev='vda' bus='virtio'/>
+      <transient/>
+    </disk>
+    <controller type='usb' model='none'/>
+    <interface type='network'>
+      <source network='@NET@'/>
+      <model type='virtio'/>
+    </interface>
+    <input type='tablet' bus='virtio'/>
+    <graphics type='spice'>
+      <listen type='socket' socket='@SOCK@'/>
+      <image compression='off'/>
+      <clipboard copypaste='no'/>
+      <filetransfer enable='no'/>
+    </graphics>
+    <sound model='ich9'>
+      <codec type='output'/>
+      <audio id='1'/>
+    </sound>
+    <audio id='1' type='spice'/>
+    <video>
+      <model type='virtio' heads='1' primary='yes'>
+        <resolution x='1920' y='1080'/>
+      </model>
+    </video>
+    <rng model='virtio'>
+      <backend model='random'>/dev/urandom</backend>
+    </rng>
+    <memballoon model='none'/>
+  </devices>
+</domain>
