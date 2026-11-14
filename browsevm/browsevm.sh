@@ -8,12 +8,12 @@
 #                                        domain, start / stop unit, polkit rule, launcher
 #   sudo browsevm/browsevm.sh report     one start with a serial port: the kiosk's own state
 #
-# build: Fedora minimal + cage + Firefox from browsevm.ks, network "browse" (section
-# browsevm), Firefox floor policy = browsers/firefox/policies.json + uBlock Origin
-# (Fedora package, force-installed) + Mullvad Browser Extension (signed xpi from
-# cdn.mullvad.net, fetched at build, force-installed from the image) + no first-run
-# pages. The base image is never booted for browsing: the VM (step 3) runs on a
-# throwaway overlay.
+# build: Fedora minimal + cage + Mullvad Browser from browsevm.ks, network "browse"
+# (section browsevm). The browser comes from Mullvad's own rpm repository, added in the
+# kickstart's %post the way Mullvad documents it (repo file, signature checked by dnf),
+# and is left exactly as shipped: its fingerprint is the same for everybody who uses it.
+# The base image is never booted for browsing: the VM (step 3) runs on a throwaway
+# overlay.
 # --iso: installer (kernel, initrd, stage2) from a local Fedora Everything netinst ISO
 # (needs xorriso), packages still from the mirrors. Without it: all from the network tree.
 # Output: the install's serial console logged by virtlogd to
@@ -40,10 +40,9 @@
 set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-REPO=$(dirname "$HERE")
 FEDORA="${BROWSEVM_FEDORA:-45}"
 BASE=/var/lib/libvirt/images/browsevm-base.qcow2
-RUNIMG=/var/lib/libvirt/images/browsevm-run.qcow2    # the VM's disk (same paths in browsevm-ctl.sh)
+RUNIMG=/var/lib/libvirt/browsevm-run/browsevm-run.qcow2   # the VM's disk, on a tmpfs (same paths in browsevm-ctl.sh)
 BUILD=browsevm-build
 DOM=browsevm
 NET=browse
@@ -51,11 +50,7 @@ SOCK=/run/browsevm/spice.sock    # same path in browsevm-ctl.sh and browsevm-vie
 ETC=/etc/browsevm                # network.xml (section browsevm), domain.xml, view-user
 LOGDIR=/var/log/libvirt/qemu     # virtlogd writes here (virt_log_t); QEMU never opens it
 MIN_KBPS="${BROWSEVM_MIN_KBPS:-200}"
-# Mullvad ships the Firefox extension itself (not on addons.mozilla.org); the xpi is
-# Mozilla-signed and Firefox checks the signature at install. New version: change it here.
-MULLVAD_EXT="${BROWSEVM_MULLVAD_EXT:-0.9.11}"
-MULLVAD_XPI_URL="https://cdn.mullvad.net/browser-extension/$MULLVAD_EXT/mullvad-browser-extension-$MULLVAD_EXT.xpi"
-MULLVAD_XPI_IN_VM=/usr/share/browsevm/mullvad-browser-extension.xpi
+MULLVAD_REPO=https://repository.mullvad.net/rpm/stable/mullvad.repo   # same URL in browsevm.ks
 V=(virsh -q -c qemu:///system)
 TMPD=""
 trap '[[ -n $TMPD ]] && rm -rf "$TMPD"' EXIT
@@ -78,8 +73,7 @@ cmd_build() {
   [[ $EUID -eq 0 ]] || die "run with sudo"
   [[ $FEDORA =~ ^[0-9]{2}$ ]] || die "BROWSEVM_FEDORA must be a release number (e.g. 45)"
   [[ $MIN_KBPS =~ ^[0-9]+$ ]] || die "BROWSEVM_MIN_KBPS must be a number (KB/s)"
-  [[ $MULLVAD_EXT =~ ^[0-9]+(\.[0-9]+){1,3}$ ]] || die "BROWSEVM_MULLVAD_EXT must be a version (e.g. 0.9.11)"
-  for c in virt-install virsh python3 curl; do
+  for c in virt-install virsh curl; do
     command -v "$c" >/dev/null || die "$c missing"
   done
   "${V[@]}" net-info "$NET" >/dev/null 2>&1 || die "network $NET missing: sudo ./harden-workstation.sh browsevm"
@@ -92,14 +86,17 @@ cmd_build() {
   if "${V[@]}" dominfo "$BUILD" >/dev/null 2>&1; then
     die "a $BUILD domain exists (old run?): sudo virsh destroy $BUILD; sudo virsh undefine $BUILD"
   fi
-  if [[ -e $BASE ]]; then
-    ((force)) || die "$BASE exists (--force moves it to $BASE.old)"
-    mv -f "$BASE" "$BASE.old"
-    warn "old base moved to $BASE.old"
-  fi
+  if [[ -e $BASE ]] && ((!force)); then die "$BASE exists (--force moves it to $BASE.old)"; fi
 
+  # nothing is touched before the network answers (a VPN that just reconnected needs a
+  # moment: 6 tries, 10 s apart)
   url="https://download.fedoraproject.org/pub/fedora/linux/releases/$FEDORA/Everything/x86_64/os/"
-  curl -fsSL --max-time 30 -o /dev/null "$url.treeinfo" || die "Fedora $FEDORA install tree not reachable: $url"
+  for c in 1 2 3 4 5 6; do
+    if curl -fsSL --max-time 30 -o /dev/null "$url.treeinfo"; then c=ok; break; fi
+    warn "install tree not reachable yet (try $c of 6)"
+    sleep 10
+  done
+  [[ $c == ok ]] || die "Fedora $FEDORA install tree not reachable: $url"
   ok "install tree: Fedora $FEDORA"
 
   # speed probe: the install pulls ~2.5 GB (initrd, installer image, packages) through
@@ -119,60 +116,19 @@ cmd_build() {
   tmp=$(mktemp -d)
   TMPD=$tmp
 
-  # Mullvad Browser Extension: Mozilla-signed xpi from Mullvad's CDN (Firefox checks the
-  # signature at install); its add-on ID comes from the xpi's own manifest
-  if curl -fsSL --max-time 60 -o "$tmp/mullvad-browser-extension.xpi" "$MULLVAD_XPI_URL"; then
-    ok "Mullvad Browser Extension downloaded ($(sha256sum "$tmp/mullvad-browser-extension.xpi" | cut -c1-16)...)"
-  else
-    warn "Mullvad Browser Extension not downloaded - the base image is built without it"
-    rm -f "$tmp/mullvad-browser-extension.xpi"
-  fi
-  python3 -I - "$REPO/browsers/firefox/policies.json" "$tmp/browsevm-policies.json" \
-      "$tmp/mullvad-browser-extension.xpi" "$MULLVAD_XPI_IN_VM" <<'PY'
-import json, os, sys, zipfile
-src, dst, xpi, xpi_vm = sys.argv[1:5]
-d = json.load(open(src))
-p = d["policies"]
-ext = p.setdefault("ExtensionSettings", {})
-ext["uBlock0@raymondhill.net"] = {"installation_mode": "force_installed",
-                                  "install_url": "file://@UBLOCK_XPI@"}
-if os.path.exists(xpi):
-    try:
-        m = json.loads(zipfile.ZipFile(xpi).read("manifest.json"))
-        gecko = (m.get("browser_specific_settings") or m.get("applications") or {}).get("gecko", {})
-        aid = gecko["id"]
-        ext[aid] = {"installation_mode": "force_installed", "install_url": "file://" + xpi_vm}
-        print(f"[+] Mullvad Browser Extension {m.get('version', '?')} id {aid}")
-    except (KeyError, ValueError, zipfile.BadZipFile) as e:
-        print(f"[!] Mullvad Browser Extension: no add-on ID in the xpi ({e}) - left out")
-        os.remove(xpi)
-p["OverrideFirstRunPage"] = ""
-p["OverridePostUpdatePage"] = ""
-p["DisableProfileImport"] = True
-json.dump(d, open(dst, "w"), indent=2)
-PY
-  ok "Firefox policy written (repo floor + extensions above + no first-run pages)"
+  # the browser's repository must answer before 10 minutes of install are spent
+  curl -fsSL --max-time 30 -o /dev/null "$MULLVAD_REPO" || die "Mullvad's rpm repository not reachable: $MULLVAD_REPO"
+  ok "Mullvad rpm repository reachable"
 
-  # kickstart: release, policy and extension URL + hash written into it (only the
-  # kickstart survives the installer's switch_root, injected files do not)
-  python3 -I - "$HERE/browsevm.ks" "$tmp/browsevm.ks" "$FEDORA" "$tmp/browsevm-policies.json" \
-      "$tmp/mullvad-browser-extension.xpi" "$MULLVAD_XPI_URL" <<'PY'
-import hashlib, json, os, sys
-src, dst, fedora, pol, xpi, xpi_url = sys.argv[1:7]
-ks = open(src).read()
-policy = open(pol).read()
-json.loads(policy)
-assert "BROWSEVM_POLICY" not in policy
-url, sha = "", ""
-if os.path.exists(xpi):
-    url, sha = xpi_url, hashlib.sha256(open(xpi, "rb").read()).hexdigest()
-for k, v in (("@FEDORA@", fedora), ("@MULLVAD_XPI_URL@", url),
-             ("@MULLVAD_XPI_SHA256@", sha), ("@POLICY_JSON@", policy.rstrip("\n"))):
-    assert k in ks, k
-    ks = ks.replace(k, v)
-open(dst, "w").write(ks)
-PY
-  ok "kickstart written (policy inside, extension $([[ -f $tmp/mullvad-browser-extension.xpi ]] && echo "URL + sha256" || echo none))"
+  # kickstart: only the release is filled in (injected into the installer's initrd)
+  sed "s|@FEDORA@|$FEDORA|g" "$HERE/browsevm.ks" > "$tmp/browsevm.ks"
+  if grep '@[A-Z_0-9]*@' "$tmp/browsevm.ks" >/dev/null; then die "browsevm.ks: a field was not filled"; fi
+  ok "kickstart written"
+
+  if [[ -e $BASE ]]; then
+    mv -f "$BASE" "$BASE.old"
+    warn "old base moved to $BASE.old"
+  fi
 
   if [[ $("${V[@]}" net-info "$NET" | sed -n 's/^Active: *//p') != yes ]]; then
     "${V[@]}" net-start "$NET" >/dev/null && started_net=1 && ok "network $NET started for the install"
@@ -264,7 +220,7 @@ cmd_install() {
       warn "$user is in group $f: the VM is meant for a user without it"
     fi
   done
-  for f in virsh systemctl qemu-img; do
+  for f in virsh systemctl qemu-img mountpoint; do
     command -v "$f" >/dev/null || die "$f missing"
   done
   for f in domain.xml browsevm-ctl.sh browsevm-view.sh browsevm.service 60-browsevm.rules browsevm.desktop; do

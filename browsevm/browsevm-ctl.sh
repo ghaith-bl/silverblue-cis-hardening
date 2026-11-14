@@ -6,23 +6,28 @@
 # browsevm.service only: the daily user starts / stops that unit (polkit rule) and never
 # talks to libvirt itself (libvirt access = root).
 #
-#   browsevm-ctl start   new empty overlay on the base image, network "browse" up,
-#                        /run/browsevm for the SPICE socket, virsh start, socket handed
-#                        to the viewing user (group, 0660, the VM's MCS pair)
-#   browsevm-ctl stop    virsh shutdown, destroy after STOP_SECS, overlay deleted, base
-#                        image back to root 0600 + its file context, network down,
-#                        /run/browsevm removed
+#   browsevm-ctl start   a tmpfs for the VM's disk, new empty overlay on the base image
+#                        in it, network "browse" up, /run/browsevm for the SPICE socket,
+#                        virsh start, socket handed to the viewing user (group, 0660, the
+#                        VM's MCS pair)
+#   browsevm-ctl stop    virsh shutdown, destroy after STOP_SECS, tmpfs unmounted (the
+#                        overlay with it), base image back to root 0600 + its file
+#                        context, network down, /run/browsevm removed
 #
 # The base image is never the VM's disk: it is the backing file of the overlay, which
 # libvirt labels virt_content_t (read-only for every VM process). Whatever a session
-# wrote is in the overlay, and the overlay is deleted.
+# wrote is in the overlay, and the overlay lives in RAM only (tmpfs, RUN_SIZE at most):
+# nothing of a session ever reaches the disk, and nothing is left after the stop. A full
+# tmpfs pauses the VM (write error); closing the window ends it like any session.
 #
 set -uo pipefail
 
 DOM=browsevm
 NET=browse
 BASE=/var/lib/libvirt/images/browsevm-base.qcow2   # same paths in browsevm.sh
-RUNIMG=/var/lib/libvirt/images/browsevm-run.qcow2
+RUNDISK=/var/lib/libvirt/browsevm-run               # mount point of the tmpfs
+RUNIMG=$RUNDISK/browsevm-run.qcow2
+RUN_SIZE=2g                              # most a session can write (RAM, only what is used)
 RUN=/run/browsevm
 SOCK=$RUN/spice.sock
 VIEW_USER_FILE=/etc/browsevm/view-user   # one line: the user who may view (written by install)
@@ -93,12 +98,29 @@ hand_over() {
   fi
 }
 
+# the VM's disk lives here: RAM only, a directory of the image type so QEMU may enter it
+# (the overlay itself gets the VM's own label from libvirt)
+disk_up() {
+  local opts="size=$RUN_SIZE,mode=0711,nosuid,nodev,noexec"
+  disk_down || return 1
+  install -d -m 0711 -o root -g root "$RUNDISK" || return 1
+  if selinux_on; then opts+=",rootcontext=system_u:object_r:virt_image_t:s0"; fi
+  mount -t tmpfs -o "$opts" browsevm-run "$RUNDISK"
+}
+
+disk_down() {
+  if mountpoint -q "$RUNDISK"; then
+    umount "$RUNDISK" || { say "warning: $RUNDISK is busy, not unmounted"; return 1; }
+  fi
+  return 0
+}
+
 down() {
   if net_active && ! net_used_by_others; then
     "${V[@]}" net-destroy "$NET" >/dev/null && say "network $NET stopped"
   fi
   rm -rf -- "$RUN"
-  rm -f -- "$RUNIMG"
+  disk_down
   base_at_rest
 }
 
@@ -116,11 +138,12 @@ cmd_start() {
   esac
   [[ -f $BASE ]] || die "$BASE missing: browsevm.sh build"
 
-  # a new empty overlay: the VM's only writable disk. A leftover (host crash) goes first.
-  rm -f -- "$RUNIMG"
+  # a new empty overlay in a new tmpfs: the VM's only writable disk. A leftover tmpfs
+  # (the VM died without a stop) is unmounted first.
   base_at_rest
+  disk_up || die "could not mount a tmpfs on $RUNDISK"
   ( umask 077; qemu-img create -q -f qcow2 -F qcow2 -b "$BASE" "$RUNIMG" ) ||
-    { rm -f -- "$RUNIMG"; die "qemu-img could not create $RUNIMG"; }
+    { disk_down; die "qemu-img could not create $RUNIMG"; }
 
   if ! net_active; then
     "${V[@]}" net-start "$NET" >/dev/null || { down; die "network $NET did not start"; }
@@ -144,7 +167,7 @@ cmd_start() {
     down
     die "no SPICE socket $SOCK after $((SOCK_WAIT / 2)) s"
   fi
-  say "started (new overlay), socket $SOCK"
+  say "started (new overlay in RAM), socket $SOCK"
 }
 
 cmd_stop() {
@@ -165,7 +188,7 @@ cmd_stop() {
     [[ $st == "shut off" || $st == gone ]] || die "domain is still '$st': not cleaned up"
   fi
   down
-  say "stopped (overlay deleted)"
+  say "stopped (overlay gone with its tmpfs)"
 }
 
 [[ $EUID -eq 0 ]] || die "run as root (by browsevm.service)"

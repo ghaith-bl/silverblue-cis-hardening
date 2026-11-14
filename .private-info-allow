@@ -5,5 +5,3 @@
 
 # systemd units with an instance (org.gnome.Shell@user.service ...) look like mail addresses.
 email  *  [\w.:\\-]+@[\w.-]*\.(?:service|socket|scope|slice|target|timer|mount)
-# Firefox extension ID of uBlock Origin (looks like an email; it is the add-on ID on addons.mozilla.org)
-email  browsevm/*  uBlock0@raymondhill\.net

@@ -3,7 +3,8 @@
   "browsevm.sh install" fills @RUNIMG@, @NET@, @SOCK@ and defines it (qemu:///system).
 
   disk     a qcow2 overlay on the base image, made new by browsevm-ctl at every start
-           and deleted at stop: every start is clean. The base is only its backing
+           on a tmpfs (RAM only) that is unmounted at stop: every start is clean and a
+           session never reaches the disk. The base is only its backing
            file, so libvirt labels it read-only for the VM (virt_content_t): a QEMU
            process that was taken over cannot change the base for the next start.
            (<transient/> on the base was not used: there the base keeps the VM's
