@@ -21,11 +21,12 @@ Status: step 1 (network) in `harden-workstation.sh browsevm`; step 2 (base image
 ## Shape
 - guest: Fedora minimal + `cage` (Wayland kiosk) + Firefox full screen, auto login of a
   user without sudo. Firefox floor policy from `browsers/firefox/policies.json`. Nothing else
-- disk: base image `/var/lib/libvirt/images/browsevm-base.qcow2`; the domain disk has
-  `<transient/>` (overlay made at start, deleted at shutdown): every start is clean,
-  downloads / cookies / malware gone at power off
-- updates: admin only, the base booted without `<transient/>`, `dnf upgrade --refresh`,
-  shutdown. Weekly or after a Firefox security release
+- disk: base image `/var/lib/libvirt/images/browsevm-base.qcow2`, never the VM's own
+  disk. The VM runs on a qcow2 overlay made new at every start and deleted at stop:
+  every start is clean, downloads / cookies / malware gone at power off. The base is
+  read-only for the VM (SELinux label, below)
+- updates: admin only: a new base built from the kept ISO (`build --force --iso`, about
+  10 min). Weekly or after a Firefox security release
 - 4 GiB RAM, 2 vCPU, base disk ~12 GiB
 - removed: spice-vdagent / spicevmc channel (clipboard), virtiofs / 9p, USB redirection,
   smartcard, GL. Sound: ich9 + SPICE audio (the host has no capture nodes: `mic` section)
@@ -68,7 +69,12 @@ BROWSEVM_FEDORA=44 sudo -E browsevm/browsevm.sh build   # other release
   no IPv6
 - kiosk: `cage@tty1.service` (cage wiki unit, `PAMName=cage`), Firefox full screen,
   restarted when closed, CPU renderer (`WLR_RENDERER=pixman`), keyboard us + ara
-  (Alt+Shift)
+  (Alt+Shift). `NoNewPrivileges=yes`: nothing the browser starts gains privileges through
+  setuid / file capabilities
+- no text console on any VT: Fedora 45's console is kmscon (tty1-6), a DRM client that
+  holds the display exclusively, so its login prompt was on screen instead of the kiosk
+  (first start 2026-11-14). kmscon removed (or masked), `kmsconvt@` / `getty@` masked,
+  logind `NAutoVTs=0`, cage `Conflicts=` both
 - Firefox: `/etc/firefox/policies/policies.json` = `browsers/firefox/policies.json` +
   uBlock Origin force-installed from the Fedora package's local .xpi + Mullvad Browser
   Extension + no first-run / post-update pages + no profile import. Interface English
@@ -101,34 +107,67 @@ Daily user: app grid `browsevm` (or `browsevm` in a terminal). Window closed = V
   (no USB, so no redirection), `<memballoon model='none'/>`, no serial console, no
   channels (vdagent, guest agent), no shares. SPICE: `<clipboard copypaste='no'/>`,
   `<filetransfer enable='no'/>`, image compression off (local socket)
-- disk: `<transient/>` on the base image. libvirt puts an overlay next to it at start
-  (`browsevm-base.qcow2.TRANSIENT-browsevm`) and deletes it when the VM stops (shutdown,
-  destroy, QEMU crash); a leftover after a host crash is deleted by libvirt at the next
-  start. The base is only the overlay's backing file; libvirt puts its owner / label
-  back after
+- disk: `/var/lib/libvirt/images/browsevm-run.qcow2`, a qcow2 overlay with the base as
+  backing file (`qemu-img create -f qcow2 -F qcow2 -b <base>`), made by `browsevm-ctl`
+  at start, deleted at stop (a leftover after a host crash: deleted at the next start).
+  libvirt's own `<transient/>` on the base was dropped after the first run (2026-11-14):
+  the base is the domain's disk there, so it kept the VM's read-write label
+  (`svirt_image_t` + the VM's MCS pair, owner `qemu`) while the VM ran and after it
+  stopped: a taken-over QEMU process could have changed the base for every later start
 - `browsevm.service` (oneshot, `RemainAfterExit`, never enabled) runs
-  `/usr/local/sbin/browsevm-ctl` as root. start: network `browse` up if off,
-  `/run/browsevm`, `virsh start`, socket handed over. stop: `virsh shutdown`, destroy
-  after 20 s, network down (unless a build uses it), `/run/browsevm` removed. A failed
-  start leaves nothing behind
+  `/usr/local/sbin/browsevm-ctl` as root. start: new overlay, network `browse` up
+  if off, `/run/browsevm`, `virsh start`, socket handed over. stop: `virsh shutdown`,
+  destroy after 20 s, overlay deleted, base back to root 0600 `virt_image_t`, network down
+  (unless a build uses it), `/run/browsevm` removed. A failed start leaves nothing behind
 - SPICE socket `/run/browsevm/spice.sock`: made by QEMU itself (user `qemu`, `svirt_t`),
   so the directory is `qemu`'s, type `qemu_var_run_t` (the type `svirt_t` may create
   sockets in; `chcon` at every start, /run is a tmpfs), mode 0750, group = the daily
-  user's own group. After the start the socket gets that group and 0660: `qemu`, root
-  and the daily user can connect, nobody else passes the directory. Who connects owns
-  the VM's screen and keyboard, nothing on the host. No TCP listener, no password needed
-- polkit rule `/etc/polkit-1/rules.d/60-browsevm.rules`: the daily user, from a local
-  active session, may `start` / `stop` `browsevm.service`
-  (`org.freedesktop.systemd1.manage-units`, `action.lookup("unit")`, `("verb")`). No
-  other unit, no restart / enable, no libvirt group (= root-equivalent). The user name
+  user's own group. After the start the socket gets that group and 0660, and directory +
+  socket get the VM's MCS pair (`chcon -l`, read from `virsh dominfo`): root and the
+  daily user can connect, the QEMU process of another VM (same Unix user `qemu`, other
+  pair) cannot. Who connects owns the VM's screen and keyboard, nothing on the host. No
+  TCP listener, no password needed
+- polkit rule `/etc/polkit-1/rules.d/60-browsevm.rules`: the daily user may `start`
+  `browsevm.service` from a local active session and `stop` it from anywhere (logout,
+  session closing; `org.freedesktop.systemd1.manage-units`, `action.lookup("unit")`,
+  `("verb")`). No other unit, no restart / enable, no libvirt group (= root-equivalent). The user name
   comes from `DAILY_USER` at install (`/etc/browsevm/view-user`), not from the repo
 - `/usr/local/bin/browsevm` (desktop entry `browsevm`): `systemctl start`, then
-  `remote-viewer --title browsevm spice+unix:///run/browsevm/spice.sock`, then
+  `remote-viewer --title browsevm --spice-disable-usbredir spice+unix:///run/browsevm/spice.sock`, then
   `systemctl stop` when the window closes. One window at a time (lock). A VM left
   running without a window (logout, crash of the viewer) is stopped first: every window
   is a new clean VM
 - the guest's size is fixed (1920x1080, no agent to resize it): the viewer scales it
 - links: typed in the VM. No way to hand one over from the host (no clipboard, by design)
+- GNOME asks once "Allow inhibiting shortcuts" for Remote Viewer: Allow = Alt+Tab, Super
+  ... go to the VM while its window has the focus (Super+Escape gives them back)
+
+## SELinux (host)
+- QEMU: `svirt_t` + a random MCS pair per start (sVirt, dynamic label), seccomp sandbox
+  and private /dev from libvirt's defaults
+- overlay (the VM's disk): `svirt_image_t` + that pair: this VM only, read-write
+- base image: `virt_content_t` while the VM runs (libvirt's label for a backing file:
+  `svirt_t` may read it, never write it), owner `qemu` for the read. At rest
+  `virt_image_t`, root 0600 (`browsevm-ctl` at start and stop: libvirt does not put a
+  backing file back)
+- SPICE socket + its directory: `qemu_var_run_t` + the VM's MCS pair
+- refs: libvirt "QEMU command-line passthrough" kbase (labels: read-only
+  `virt_content_t`, exclusive `svirt_image_t:s0:MCS`; seccomp), RHEL "sVirt labeling",
+  selinux-policy `virt.te` (`read_files_pattern(virt_domain, virt_content_t, ...)`,
+  `manage_sock_files_pattern(virt_domain, qemu_var_run_t, ...)`)
+
+## Looking inside (report)
+```
+sudo browsevm/browsevm.sh report     # VM off; about 2 min
+```
+- nobody can log in to the VM. The image's `browsevm-report.service` writes the kiosk's
+  state to the first serial port 45 s after boot: cage unit + its journal, SELinux label
+  and no_new_privs of cage / Firefox, sessions, consoles, AVC denials, network, sound
+  cards, errors
+- the browsing domain has no serial port: the open fails, nothing is sent. `report`
+  defines the domain once with a serial port (logged by virtlogd to
+  `/var/log/libvirt/qemu/browsevm-report.serial.log`), starts it through the unit, prints
+  the report, stops it, defines the normal domain again
 
 ## Residual risk
 - QEMU / KVM escape + SELinux bypass; CPU side channels
@@ -138,7 +177,7 @@ Daily user: app grid `browsevm` (or `browsevm` in a terminal). Window closed = V
 ## Steps
 1. network: `browse`, firewalld zone + policies, hostfw `if_vm_iso`, kvmlan (done)
 2. base image: unattended Fedora minimal install (kickstart), cage + Firefox + policy (done)
-3. domain XML (transient disk, removed devices, sound), unit, polkit rule, desktop file
+3. domain XML (overlay disk, removed devices, sound), unit, polkit rule, desktop file
    (done)
 4. checks: `ps -Z` (svirt_t + MCS), overlay gone after shutdown, no clipboard, sectop flows,
    lab VM and LAN unreachable, Mullvad disconnect = no internet
