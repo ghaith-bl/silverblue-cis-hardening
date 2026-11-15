@@ -94,6 +94,10 @@ Tests run after hardening + reboot. All passed.
 | time: NTS only | `chronyc -N authdata` (sudo if denied); `chronyc -n sources` | 5 servers, Mode `NTS`, KE / Cook > 0; `^*` on one of them |
 | time: synced | `chronyc tracking` | `Leap status : Normal`, small `System time` offset |
 | time: no DHCP servers | `grep -E '^(pool\|sourcedir)' /etc/chrony.conf` | nothing |
+| autoupdate: OS | `rpm-ostree status \| grep AutomaticUpdates`; `systemctl list-timers rpm-ostreed-automatic.timer` | `stage; rpm-ostreed-automatic.timer: last run ...`; a next run |
+| autoupdate: staged | `rpm-ostree status` after a run with updates | a deployment marked `(staged)`; booted after the next reboot |
+| autoupdate: Flatpak | `systemctl list-timers flatpak-update-system.timer`; `systemctl --user list-timers flatpak-update-user.timer` (daily user); `journalctl -u flatpak-update-system` | both timers listed; runs without errors |
+| browsevm update | `systemctl list-timers browsevm-update.timer`; `journalctl -u browsevm-update.service`; `cat /var/lib/browsevm/base.info` | daily run; `nothing to do` or a rebuild with versions before / now |
 | AF_ALG off (kernel arg) | `grep -o 'initcall_blacklist=[^ ]*' /proc/cmdline` | `initcall_blacklist=af_alg_init` |
 | AF_ALG socket fails | `python3 -I -c 'import socket; socket.socket(socket.AF_ALG, socket.SOCK_SEQPACKET)'` | `OSError: [Errno 97] Address family not supported by protocol` |
 | hardening kargs | `grep -oE 'page_alloc.shuffle=[^ ]*\|rd.shell=[^ ]*\|rd.emergency=[^ ]*' /proc/cmdline` | `page_alloc.shuffle=1`, `rd.shell=0`, `rd.emergency=halt` |

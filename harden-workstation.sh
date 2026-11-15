@@ -56,6 +56,10 @@ SVIRT_OFF_BOOLEANS=(virt_use_usb virt_use_nfs)  # svirt section: SELinux boolean
                              # every VM process may reach on the host); () = leave them
 USBGUARD_BLOCK_BLUETOOTH="yes" # usbguard section: USB Bluetooth adapters blocked in the rules
                              # generated from the devices present ("no" = allowed like the rest)
+AUTO_UPDATE_POLICY="stage"   # autoupdate section: rpm-ostree automatic updates (daily timer): "stage" =
+                             # download + prepare, applied at the next reboot; "check" = only look;
+                             # "none" = off (manual rpm-ostree upgrade)
+FLATPAK_AUTO_UPDATE="yes"    # autoupdate section: Flatpaks (system + every user's) updated daily; "no" = leave
 APP_UNITS=(brave-browser)    # appunit section: desktop ids started as their own service (launcher
                              # forks before GNOME moves it: Chromium family); () = none
 ADMIN_USER="${ADMIN_USER:-}" # accounts section: CLI-only admin (wheel, text console, hidden
@@ -72,7 +76,7 @@ else
 fi
 
 BACKUP_ROOT="/var/backups/hardening/$(date +%Y%m%d-%H%M%S)"
-SECTIONS=(sysctl modules coredump journald gnome sudo pam pwage su accounts services loopback cron sshd auditd audit-rules perms mic netprivacy mullvad kvmlan browsevm svirt usbguard appunit time kargs)
+SECTIONS=(sysctl modules coredump journald gnome sudo pam pwage su accounts services loopback cron sshd auditd audit-rules perms mic netprivacy mullvad kvmlan browsevm svirt usbguard appunit time autoupdate kargs)
 
 # -----------------------------------------------------------------------------
 # Helpers
@@ -1321,6 +1325,116 @@ sec_appunit() {
   log "close the apps, then log out and in once: started from the menu they run in app-<id>@<pid>.service"
 }
 
+## CIS Controls v8 7.3, 7.4 (automated OS and application patch
+## management): rpm-ostree's own automatic updates (rpm-ostreed.conf AutomaticUpdatePolicy,
+## rpm-ostreed-automatic.timer: an hour after boot, then daily). "stage" downloads the new
+## deployment with its layered packages (Mullvad VPN, Brave, ...) and leaves it for the next
+## boot (ostree-finalize-staged): nothing changes under a running session, the previous
+## deployment stays in GRUB (rpm-ostree rollback). Flatpaks: a system unit for system-wide
+## installs, a global user unit for each user's own. Both daily, Persistent.
+sec_autoupdate() {
+  local conf=/etc/rpm-ostreed.conf
+  case $AUTO_UPDATE_POLICY in
+    none|check|stage) ;;
+    *) warn "AUTO_UPDATE_POLICY '$AUTO_UPDATE_POLICY': none, check or stage (apply reboots by itself: not here) - skipped"; return 0 ;;
+  esac
+  if command -v rpm-ostree >/dev/null && [[ -f $conf ]]; then
+    if grep -Eq "^AutomaticUpdatePolicy=$AUTO_UPDATE_POLICY\$" "$conf"; then
+      log "$conf: AutomaticUpdatePolicy=$AUTO_UPDATE_POLICY"
+    else
+      backup "$conf"
+      if grep -Eq '^[#[:space:]]*AutomaticUpdatePolicy[[:space:]]*=' "$conf"; then
+        sed -i -E "s|^[#[:space:]]*AutomaticUpdatePolicy[[:space:]]*=.*|AutomaticUpdatePolicy=$AUTO_UPDATE_POLICY|" "$conf"
+      elif grep -q '^\[Daemon\]' "$conf"; then
+        sed -i "/^\[Daemon\]/a AutomaticUpdatePolicy=$AUTO_UPDATE_POLICY" "$conf"
+      else
+        printf '[Daemon]\nAutomaticUpdatePolicy=%s\n' "$AUTO_UPDATE_POLICY" >> "$conf"
+      fi
+      restorecon -F "$conf" 2>/dev/null || true
+      log "$conf: AutomaticUpdatePolicy=$AUTO_UPDATE_POLICY"
+      rpm-ostree reload || warn "rpm-ostree reload failed"
+    fi
+    if [[ $AUTO_UPDATE_POLICY == none ]]; then
+      systemctl disable --now rpm-ostreed-automatic.timer >/dev/null 2>&1 && log "rpm-ostreed-automatic.timer off"
+    elif systemctl enable --now rpm-ostreed-automatic.timer >/dev/null 2>&1; then
+      log "rpm-ostreed-automatic.timer on (an hour after boot, then daily)"
+    else
+      warn "could not enable rpm-ostreed-automatic.timer"
+    fi
+    rpm-ostree status 2>/dev/null | grep -E 'AutomaticUpdates' || true
+  else
+    warn "no rpm-ostree / $conf: OS updates left as they are"
+  fi
+
+  if [[ $FLATPAK_AUTO_UPDATE != yes ]]; then
+    log "FLATPAK_AUTO_UPDATE=$FLATPAK_AUTO_UPDATE: Flatpak updates left as they are"; return 0
+  fi
+  command -v flatpak >/dev/null || { warn "no flatpak: skipped"; return 0; }
+  write_file /etc/systemd/system/flatpak-update-system.service 0644 <<'EOF'
+# harden-workstation.sh autoupdate: system-wide Flatpaks
+[Unit]
+Description=Update system Flatpaks
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/flatpak update --system --noninteractive --assumeyes
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=1h
+EOF
+  write_file /etc/systemd/system/flatpak-update-system.timer 0644 <<'EOF'
+# harden-workstation.sh autoupdate
+[Unit]
+Description=Daily update of system Flatpaks
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=1h
+Persistent=true
+OnBootSec=20min
+
+[Install]
+WantedBy=timers.target
+EOF
+  write_file /etc/systemd/user/flatpak-update-user.service 0644 <<'EOF'
+# harden-workstation.sh autoupdate: this user's own Flatpaks (--user installs)
+[Unit]
+Description=Update my Flatpaks
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/flatpak update --user --noninteractive --assumeyes
+Nice=10
+EOF
+  write_file /etc/systemd/user/flatpak-update-user.timer 0644 <<'EOF'
+# harden-workstation.sh autoupdate
+[Unit]
+Description=Daily update of my Flatpaks
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=1h
+Persistent=true
+OnBootSec=20min
+
+[Install]
+WantedBy=timers.target
+EOF
+  systemctl daemon-reload
+  if systemctl enable --now flatpak-update-system.timer >/dev/null 2>&1; then
+    log "flatpak-update-system.timer on (daily)"
+  else
+    warn "could not enable flatpak-update-system.timer"
+  fi
+  if systemctl --global enable flatpak-update-user.timer >/dev/null 2>&1; then
+    log "flatpak-update-user.timer on for every user (from their next login)"
+  else
+    warn "could not enable flatpak-update-user.timer globally"
+  fi
+}
+
 sec_time() {
   write_file /etc/chrony.conf 0644 <<'EOF'
 # harden-workstation.sh time: NTS only, no pool, no servers from DHCP
@@ -1425,6 +1539,7 @@ main() {
       usbguard)    sec_usbguard ;;
       appunit)     sec_appunit ;;
       time)        sec_time ;;
+      autoupdate)  sec_autoupdate ;;
       kargs)       sec_kargs ;;
       *)           warn "unknown section: $s" ;;
     esac

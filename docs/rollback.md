@@ -40,6 +40,11 @@ sudo systemctl restart systemd-journald
 sudo rm /etc/tmpfiles.d/90-cis-grub.conf          # GRUB file modes no longer set at boot
 sudo chage -M 99999 <user>                        # pwage: no expiry (login.defs: backup)
 sudo cp /var/backups/hardening/<time>/etc/chrony.conf /etc/ && sudo systemctl restart chronyd
+sudo systemctl disable --now rpm-ostreed-automatic.timer   # autoupdate: OS updates by hand again
+sudo sed -i 's/^AutomaticUpdatePolicy=.*/AutomaticUpdatePolicy=none/' /etc/rpm-ostreed.conf && sudo rpm-ostree reload
+sudo rpm-ostree cleanup -p                       # drop a staged (not yet booted) update
+sudo systemctl disable --now flatpak-update-system.timer && sudo systemctl --global disable flatpak-update-user.timer
+sudo systemctl disable --now browsevm-update.timer   # browsevm: no daily base rebuild
 sudo rpm-ostree kargs --delete=initcall_blacklist=af_alg_init   # then reboot
 sudo rpm-ostree kargs --delete=page_alloc.shuffle=1 --delete=rd.shell=0 --delete=rd.emergency=halt
 sudo rpm-ostree kargs --delete=init_on_free=1 --delete=iommu.strict=1

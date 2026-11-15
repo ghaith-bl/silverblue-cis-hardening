@@ -86,6 +86,8 @@ sudo ./harden-workstation.sh all
 | `BROWSEVM_NET`         | `192.168.123` | `browsevm`: its /24 (host .1, DHCP .10-.20) |
 | `SVIRT_OFF_BOOLEANS`   | `(virt_use_usb virt_use_nfs)` | `svirt`: SELinux booleans turned off for every VM process; `()` = leave them |
 | `USBGUARD_BLOCK_BLUETOOTH` | `yes` | USB Bluetooth adapters blocked in the generated USBGuard rules |
+| `AUTO_UPDATE_POLICY`   | `stage`    | `autoupdate`: rpm-ostree automatic updates (daily): `stage` = ready for the next boot, `check` = only look, `none` = manual |
+| `FLATPAK_AUTO_UPDATE`  | `yes`      | `autoupdate`: system + every user's Flatpaks updated daily; `no` = leave |
 | `APP_UNITS`            | `(brave-browser)` | desktop ids `appunit` starts as their own service; `()` = none |
 | `ADMIN_USER`           | `""` (env) | `accounts`: text-console admin; `""` = one account |
 | `DAILY_USER`           | `""` (env) | `accounts`: GNOME daily user, no sudo; also the user of the desktop steps. Give it to every run from the admin |
@@ -113,15 +115,18 @@ sudo ./harden-workstation.sh kvmlan   # VMs: lease + ssh with Allow LAN off
 sudo ./harden-workstation.sh browsevm # throwaway browsing VM, step 1: its network (new hostfw first)
 sudo browsevm/browsevm.sh build       # browsevm step 2: base image (unattended Fedora install)
 sudo DAILY_USER=<daily> browsevm/browsevm.sh install
-                                      # browsevm step 3: domain, unit, polkit rule, launcher
-                                      # (needs virt-viewer layered); then "browsevm" in the app grid
+                                      # browsevm step 3: domain, units, polkit rule, launchers,
+                                      # daily update timer (needs virt-viewer layered); then
+                                      # "browsevm Mullvad" / "browsevm Brave" in the app grid
 sudo browsevm/browsevm.sh report      # the kiosk's own state (one start with a serial port)
+sudo browsevm/browsevm.sh update      # new base image now (the timer does it at 7 days)
 sudo ./harden-workstation.sh svirt    # VMs: no host USB / NFS for QEMU, unconfined domains refused
 sudo rpm-ostree install usbguard && systemctl reboot
 sudo ./harden-workstation.sh usbguard # run 1 starts it: test keyboard, new device blocked,
                                       # sudo usb-allow-storage; run 2 enables it
 sudo ./harden-workstation.sh appunit  # close Brave, log out and in
 sudo ./harden-workstation.sh time     # VPN connected; then chronyc -N authdata
+sudo ./harden-workstation.sh autoupdate  # OS staged daily (applied at reboot), Flatpaks daily
 sudo grub2-setpassword                # by hand, before kargs (user root at the menu)
 sudo ./harden-workstation.sh kargs    # reboot: LUKS unlock, Wi-Fi, VPN, a VM
 ```
@@ -156,6 +161,7 @@ sudo ./harden-workstation.sh kargs    # reboot: LUKS unlock, Wi-Fi, VPN, a VM
 | `usbguard`    | not CIS: rules from the devices present, CLI root only, `usb-allow-storage`, GNOME usb-protection off. Run twice: start + test, then enable | only known devices work, locked or not; flash drive: `sudo usb-allow-storage` |
 | `appunit`     | not CIS: apps in `APP_UNITS` start as `app-<id>@<pid>.service` (Brave left GNOME Shell's cgroup) | the app in its own unit; after a Brave update run it again |
 | `time`        | chrony: NTS only (Netnod + PTB), `authselectmode require`, `minsources 2`, no pool, no DHCP NTP | no time sync without the tunnel |
+| `autoupdate`  | CIS Controls v8 7.3 / 7.4: `/etc/rpm-ostreed.conf` `AutomaticUpdatePolicy=stage` + `rpm-ostreed-automatic.timer` (OS + layered packages downloaded daily, applied at the next boot); `flatpak-update-system.timer` + global user `flatpak-update-user.timer` (daily) | updates arrive without asking; reboot to apply the OS one (`rpm-ostree status`) |
 | `kargs`       | not CIS: `KERNEL_ARGS` via `rpm-ostree kargs` (next boot): AF_ALG off, random page allocator, no initramfs shell, freed memory zeroed, strict IOMMU | no Adiantum / Serpent / Twofish LUKS, BlueZ mesh, iwd; boot failure halts |
 
 Reasons and costs of every not-CIS choice: [docs/deviations.md](docs/deviations.md).
