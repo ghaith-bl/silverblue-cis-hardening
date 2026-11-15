@@ -72,7 +72,6 @@ BUILD_LOCK=/run/browsevm-build.lock   # held by build; browsevm-ctl / the launch
 LIB=/usr/local/lib/browsevm           # root-owned copy run by browsevm-update.service
 INFO=/var/lib/browsevm/base.info      # date + browser versions of the last good build
 IMGDIR=/var/lib/libvirt/images        # base image, kept netinst ISO
-BROWSERS=(mullvad brave)
 UNITS=(browsevm@mullvad.service browsevm@brave.service)
 V=(virsh -q -c qemu:///system)
 TMPD=""
