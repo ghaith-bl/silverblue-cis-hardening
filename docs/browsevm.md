@@ -242,6 +242,13 @@ in a terminal). Window closed = VM stopped.
   then `systemctl stop` when the window closes. One window at a time (lock). A VM left
   running without a window (logout, crash of the viewer) is stopped first: every window
   is a new clean VM. While the base is rebuilt (build lock taken): a note, no start
+- viewer crash on Wayland: GTK 3 ends a client with `_exit(1)` when its socket to GNOME
+  Shell is full (`Gdk-Message: Error flushing display: Resource temporarily unavailable`,
+  Brave on a busy page, 2026-11-15; known for virt-viewer under Wayland). The launcher
+  keeps the viewer's stderr; with that line (or `dispatching to Wayland display`) and the
+  unit still active it opens the viewer again on the same VM (up to 5 times in 2 min).
+  Not `GDK_BACKEND=x11`: on Xwayland other X11 clients could read what is typed into the
+  VM
 - install removes an old `browsevm.service` (before 2026-11-15: one browser)
 - the guest's size is fixed (1920x1080, no agent to resize it): the viewer scales it
 - links: typed in the VM. No way to hand one over from the host (no clipboard, by design)

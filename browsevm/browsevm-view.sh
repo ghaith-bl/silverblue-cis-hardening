@@ -61,5 +61,27 @@ started=1
 systemctl start "$UNIT" || { note "could not start $UNIT (journalctl -u $UNIT)"; exit 1; }
 [[ -S $SOCK && -w $SOCK ]] || { note "no access to $SOCK"; exit 1; }
 
-# no USB redirection from this side either (the VM has no USB controller)
-remote-viewer --title "browsevm $BROWSER" --spice-disable-usbredir "spice+unix://$SOCK" 9>&-
+# no USB redirection from this side either (the VM has no USB controller).
+# GTK 3 on Wayland ends a client with _exit(1) when its socket to GNOME Shell is full
+# ("Gdk-Message: Error flushing display: Resource temporarily unavailable"; seen with
+# Brave's busy pages, 2026-11-15; known for virt-viewer under Wayland). The VM is fine
+# then: the viewer is opened again on the same VM (same session), up to 5 times in a
+# row. Any other end (window closed, an error of its own) stops the VM as before.
+err=$(mktemp "${XDG_RUNTIME_DIR:-/tmp}/browsevm-viewer.XXXXXX")
+crashes=0
+while :; do
+  t0=$SECONDS
+  remote-viewer --title "browsevm $BROWSER" --spice-disable-usbredir "spice+unix://$SOCK" \
+    9>&- 2> "$err"
+  cat "$err" >&2
+  if ! grep -E 'Error flushing display|dispatching to Wayland display' "$err" >/dev/null; then
+    break
+  fi
+  systemctl is-active --quiet "$UNIT" || break
+  ((SECONDS - t0 > 120)) && crashes=0
+  crashes=$((crashes + 1))
+  if ((crashes > 5)); then note "the viewer keeps crashing: VM stopped"; break; fi
+  : > "$err"
+  sleep 1
+done
+rm -f "$err"
