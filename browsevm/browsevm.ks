@@ -1,5 +1,5 @@
 # browsevm.ks - unattended install of the browsevm base image (Fedora minimal + cage
-# kiosk + Mullvad Browser). Used by browsevm.sh build, which fills the release (@...@)
+# kiosk + Mullvad Browser + Brave, one of them per start). Used by browsevm.sh build, which fills the release (@...@)
 # and injects this file into the installer's initrd (only the kickstart is carried over
 # to the installed system, so everything else is written from %post).
 # Nothing here is a secret: the only user has a locked password and no sudo.
@@ -83,6 +83,123 @@ else
 fi
 rm -f /tmp/mullvad-install.log
 
+# the second browser: Brave from Brave's own rpm repository, the way Brave documents it
+# for Fedora Atomic (its repo file into /etc/yum.repos.d, then install). Same rules as
+# above: gpgcheck forced on, a repo file without a gpgkey line refused. Chosen per start
+# by the host (browsevm-select below): more sites work in it (fingerprint randomized per
+# site instead of one look for everybody).
+bb=""
+repo=/etc/yum.repos.d/brave-browser.repo
+if curl -fsSL --retry 3 --max-time 60 -o "$repo" https://brave-browser-rpm-release.s3.brave.com/brave-browser.repo &&
+   grep -q '^gpgkey *= *https://' "$repo"; then
+  sed -i -e '/^gpgcheck[ =]/d' -e '/^pkg_gpgcheck[ =]/d' -e 's/^\(\[.*\]\)$/\1\ngpgcheck=1/' "$repo"
+  say "brave repo key $(sed -n 's/^gpgkey *= *//p' "$repo" | head -n 1), gpgcheck $(grep -c '^gpgcheck=1' "$repo")"
+  dnf -y install brave-browser > /tmp/brave-install.log 2>&1
+  bb=$(rpm -q brave-browser 2>/dev/null) || bb=""
+else
+  rm -f "$repo"
+  echo "repo file not downloaded, or without a gpgkey line" > /tmp/brave-install.log
+fi
+if [ -n "$bb" ]; then
+  say "browser $bb"
+  say "brave command $(command -v brave-browser || echo MISSING)"
+else
+  say "MISSING brave-browser"
+  tail -n 4 /tmp/brave-install.log | while read -r l; do say "dnf: $l"; done
+fi
+rm -f /tmp/brave-install.log
+
+# Brave's managed policies (the host's browsers/brave/policies.json, VM edition): nothing
+# sent to Brave or Google by itself (P3A, usage ping, Web Discovery, metrics / crash
+# reports, surveys), its extra services off (Rewards, Wallet, VPN, Leo AI, News, Talk,
+# Tor windows), Shields aggressive, no extension at all, no sign-in / sync / passwords /
+# autofill. "Safer" for Brave: JavaScript JIT and V8's optimizers off on every site
+# (DefaultJavaScriptJitSetting, DefaultJavaScriptOptimizerSetting = 2), HTTPS only.
+mkdir -p /etc/brave/policies/managed
+cat > /etc/brave/policies/managed/browsevm.json <<'POLICY'
+{
+  "MetricsReportingEnabled": false,
+  "BraveP3AEnabled": false,
+  "BraveStatsPingEnabled": false,
+  "BraveWebDiscoveryEnabled": false,
+  "UrlKeyedAnonymizedDataCollectionEnabled": false,
+  "FeedbackSurveysEnabled": false,
+  "UserFeedbackAllowed": false,
+  "WebRtcEventLogCollectionAllowed": false,
+  "BraveRewardsDisabled": true,
+  "BraveWalletDisabled": true,
+  "BraveVPNDisabled": true,
+  "BraveAIChatEnabled": false,
+  "BraveLocalAIEnabled": false,
+  "BraveNewsDisabled": true,
+  "BraveTalkDisabled": true,
+  "BravePlaylistEnabled": false,
+  "BraveSpeedreaderEnabled": false,
+  "BraveWaybackMachineEnabled": false,
+  "EmailAliasesEnabled": false,
+  "TorDisabled": true,
+  "PromotionsEnabled": false,
+  "DefaultBraveAdblockSetting": 2,
+  "DefaultBraveFingerprintingV2Setting": 3,
+  "DefaultBraveHttpsUpgradeSetting": 2,
+  "DefaultBraveReferrersSetting": 2,
+  "BraveDeAmpEnabled": true,
+  "BraveDebouncingEnabled": true,
+  "BraveTrackingQueryParametersFilteringEnabled": true,
+  "BraveGlobalPrivacyControlEnabled": true,
+  "BraveReduceLanguageEnabled": true,
+  "DefaultJavaScriptJitSetting": 2,
+  "DefaultJavaScriptOptimizerSetting": 2,
+  "VideoCaptureAllowed": false,
+  "AudioCaptureAllowed": false,
+  "ScreenCaptureAllowed": false,
+  "WebRtcIPHandling": "disable_non_proxied_udp",
+  "WebRtcLocalIpsAllowedUrls": [],
+  "EnableMediaRouter": false,
+  "DefaultGeolocationSetting": 2,
+  "DefaultSensorsSetting": 2,
+  "DefaultSerialGuardSetting": 2,
+  "DefaultWebUsbGuardSetting": 2,
+  "DefaultWebBluetoothGuardSetting": 2,
+  "DefaultWebHidGuardSetting": 2,
+  "DefaultFileSystemReadGuardSetting": 2,
+  "DefaultFileSystemWriteGuardSetting": 2,
+  "DefaultLocalFontsSetting": 2,
+  "DefaultWindowManagementSetting": 2,
+  "DefaultIdleDetectionSetting": 2,
+  "DefaultClipboardSetting": 2,
+  "DefaultNotificationsSetting": 2,
+  "DefaultPopupsSetting": 2,
+  "DefaultAutomaticDownloadsSetting": 2,
+  "DefaultInsecureContentSetting": 2,
+  "SafeBrowsingProtectionLevel": 1,
+  "SafeBrowsingSurveysEnabled": false,
+  "SafeBrowsingDeepScanningEnabled": false,
+  "PasswordLeakDetectionEnabled": false,
+  "BlockThirdPartyCookies": true,
+  "HttpsOnlyMode": "force_enabled",
+  "HttpsUpgradesEnabled": true,
+  "DnsOverHttpsMode": "off",
+  "BrowserSignin": 0,
+  "SyncDisabled": true,
+  "PasswordManagerEnabled": false,
+  "AutofillAddressEnabled": false,
+  "AutofillCreditCardEnabled": false,
+  "PaymentMethodQueryEnabled": false,
+  "SearchSuggestEnabled": false,
+  "NetworkPredictionOptions": 2,
+  "AlternateErrorPagesEnabled": false,
+  "BackgroundModeEnabled": false,
+  "SpellCheckServiceEnabled": false,
+  "TranslateEnabled": false,
+  "RemoteDebuggingAllowed": false,
+  "DefaultBrowserSettingEnabled": false,
+  "ExtensionInstallBlocklist": ["*"]
+}
+POLICY
+chmod 0644 /etc/brave/policies/managed/browsevm.json
+say "brave policies $(grep -c '^  "' /etc/brave/policies/managed/browsevm.json) keys, JIT $(sed -n 's/.*"DefaultJavaScriptJitSetting": *\([0-9]*\).*/\1/p' /etc/brave/policies/managed/browsevm.json) (2 = off), Web Discovery $(sed -n 's/.*"BraveWebDiscoveryEnabled": *\([a-z]*\).*/\1/p' /etc/brave/policies/managed/browsevm.json)"
+
 # kiosk: cage on tty1 as user web, the browser full screen, restarted when closed.
 # Unit from cage's wiki "Starting Cage on boot with systemd". pixman = CPU renderer.
 # Added: kmsconvt@ next to getty@ (Fedora 45: kmscon is the console of tty1-6 and takes
@@ -124,21 +241,19 @@ WantedBy=graphical.target
 Alias=display-manager.service
 DefaultInstance=tty1
 UNIT
-# the kiosk's profile: a fixed directory (--profile), new at every start of the VM like
-# everything else on its disk. user.js = the browser's own security level Safer
+# Mullvad Browser's profile: a fixed directory (--profile), new at every start of the VM
+# like everything else on its disk. user.js = the browser's own security level Safer
 # (JavaScript off on non-HTTPS sites, JIT and some fonts / math off everywhere, audio /
-# video click to play; NoScript, shipped with the browser, gives a site JavaScript for
-# this session only: its button, "Temp. TRUSTED") and that button shown (the Tor
-# Project hides it by default, tor-browser#41581). Safer is a level the browser offers
-# to everybody: users at Safer look like each other. user.js is root's (the browser
-# reads it, never writes it).
+# video click to play). NoScript, shipped with the browser, is what applies the level:
+# it stays, its toolbar button stays hidden (the browser's default). Safer is a level the
+# browser offers to everybody: users at Safer look like each other. user.js is root's
+# (the browser reads it, never writes it).
 P=/home/web/.browsevm/profile
 install -d -m 0700 -o web -g web /home/web/.browsevm "$P"
 cat > "$P/user.js" <<'USERJS'
-// browsevm: the browser's own security level Safer, NoScript's button in the toolbar
+// browsevm: the browser's own security level Safer
 user_pref("browser.security_level.security_slider", 2);
 user_pref("browser.security_level.security_custom", false);
-user_pref("extensions.hideNoScript", false);
 USERJS
 chmod 0644 "$P/user.js"
 say "profile $P, security level $(sed -n 's/.*security_slider", *\([0-9]*\).*/\1/p' "$P/user.js") (2 = Safer)"
@@ -164,12 +279,23 @@ say "Mullvad extension $MBX permissions preset: proxy tabs <all_urls>"
 # up. A security level preset before the first start of a new profile was not applied
 # until a restart (Tor forum, Tor Browser 12.0; tor-browser#44687 in 16.0a4), and every
 # VM start is a new profile: the window only ever shows its second start.
-# Report runs (/run/browsevm-report-mode) open the local script test page.
+# Brave (when the host chose it: /run/browsevm-browser, from browsevm-select): its own
+# throwaway data directory, no first-run pages, software rendering (no GPU in the VM),
+# X11 on cage's Xwayland like the other one.
 cat > /usr/local/bin/browsevm-kiosk <<'KIOSK'
 #!/bin/bash
 P=/home/web/.browsevm/profile
 S=/home/web/.browsevm/state
 me=$(id -u)
+B=$(cat /run/browsevm-browser 2>/dev/null)
+if [ "$B" = brave ]; then
+  plat=x11
+  [ -n "${DISPLAY:-}" ] || plat=wayland
+  brave-browser --no-first-run --no-default-browser-check --disable-gpu \
+    --ozone-platform="$plat" --user-data-dir=/home/web/.browsevm/brave
+  while pgrep -u "$me" -f 'brave.com/brave/brave' >/dev/null; do sleep 2; done
+  exit 0
+fi
 running() { pgrep -u "$me" -f 'mullvad-?browser' >/dev/null; }
 [ -n "${DISPLAY:-}" ] || export MOZ_ENABLE_WAYLAND=1
 mkdir -p "$S"
@@ -185,9 +311,7 @@ if [ ! -e "$S/warm" ]; then
   sleep 1
   echo "$((SECONDS - t0))" > "$S/warm"
 fi
-url=()
-[ -e /run/browsevm-report-mode ] && url=(http://127.0.0.1:8088/)
-mullvad-browser --profile "$P" "${url[@]}"
+mullvad-browser --profile "$P"
 while running; do sleep 2; done
 KIOSK
 chmod 0755 /usr/local/bin/browsevm-kiosk
@@ -223,25 +347,28 @@ cat > /usr/local/sbin/browsevm-report <<'REPORT'
 ( : > /dev/ttyS0 ) 2>/dev/null || exit 0
 P=/home/web/.browsevm/profile
 S=/home/web/.browsevm/state
-# the kiosk's first start is headless (up to about a minute): wait for the test page
+B=$(cat /run/browsevm-browser 2>/dev/null)
+BP='mullvad-?browser|brave.com/brave/brave'
+# Mullvad Browser's first start is headless (up to about a minute): wait for the window
 for _ in $(seq 30); do
-  [ -n "$(journalctl -b -o cat -g '^jstest request: GET / ' -q --no-pager -n 1)" ] && break
+  if pgrep -u web -f "$BP" >/dev/null && { [ "$B" = brave ] || [ -e "$S/warm" ]; }; then break; fi
   sleep 5
 done
-sleep 15
+sleep 20
 {
   echo "BROWSEVM-REPORT begin"
+  echo "BROWSER ${B:-none} (chosen by the host)"
   echo "-- cage unit"
   systemctl show cage@tty1.service -p ActiveState -p SubState -p NRestarts -p ExecMainStatus | tr '\n' ' '
   echo
   journalctl -b -u cage@tty1.service --no-pager -o cat -n 25 | cut -c1-200
   echo "-- processes of web: name, SELinux label, no_new_privs"
-  for p in $(pgrep -u web -x cage) $(pgrep -u web -o -f 'mullvad-?browser'); do
+  for p in $(pgrep -u web -x cage) $(pgrep -u web -o -f "$BP"); do
     printf '%s  %s  nnp=%s\n' "$(cat /proc/$p/comm)" "$(tr -d '\0' < /proc/$p/attr/current)" \
       "$(sed -n 's/^NoNewPrivs:[[:space:]]*//p' /proc/$p/status)"
   done
-  echo "browser processes: $(pgrep -u web -c -f 'mullvad-?browser')"
-  p=$(pgrep -u web -n -f 'mullvad-?browser')
+  echo "browser processes: $(pgrep -u web -c -f "$BP")"
+  p=$(pgrep -u web -n -f "$BP")
   [ -n "$p" ] && echo "display: $(tr '\0' '\n' < /proc/$p/environ | grep -E '^(DISPLAY|WAYLAND_DISPLAY|MOZ_ENABLE_WAYLAND)=' | tr '\n' ' ')"
   pgrep -a Xwayland | cut -c1-100
   echo "-- sessions"
@@ -252,35 +379,28 @@ sleep 15
   echo "-- SELinux"
   getenforce
   journalctl -b --no-pager -o cat -g 'avc: +denied' -n 12 | cut -c1-220
+  if [ "$B" = brave ]; then
+  echo "-- Brave"
+  p=$(pgrep -u web -o -f 'brave.com/brave/brave')
+  [ -n "$p" ] && echo "browser command: $(tr '\0' ' ' < /proc/$p/cmdline | cut -c1-200)"
+  f=/etc/brave/policies/managed/browsevm.json
+  echo "policies: $(grep -c '^  "' "$f" 2>/dev/null) keys in $f"
+  grep -E '"(DefaultJavaScriptJitSetting|DefaultJavaScriptOptimizerSetting|BraveWebDiscoveryEnabled|BraveP3AEnabled|BraveStatsPingEnabled|MetricsReportingEnabled|WebRtcIPHandling)"' "$f" | tr -d ' ,'
+  ls /home/web/.browsevm/brave 2>/dev/null | head -n 12 | tr '\n' ' '
+  echo
+  [ -d /home/web/.browsevm/brave/Default ] && echo "BRAVE-PROFILE present" || echo "BRAVE-PROFILE missing"
+  else
   echo "-- security level (kiosk profile $P)"
   echo "first start (headless): $(cat "$S/warm" 2>/dev/null || echo none) s, ended by $(cat "$S/warm-end" 2>/dev/null || echo -)"
   p=$(pgrep -u web -o -f 'mullvad-?browser')
   [ -n "$p" ] && echo "browser command: $(tr '\0' ' ' < /proc/$p/cmdline | cut -c1-160)"
   if [ -f "$P/prefs.js" ]; then
     grep -E 'security_level|hideNoScript' "$P/prefs.js" | cut -c1-120
-    grep -o 'nav-bar\\":\[[^]]*\]' "$P/prefs.js" | grep 73a6fe31-595d-460b-a920-fcc0f8843232 >/dev/null &&
-      echo "NOSCRIPT-BUTTON toolbar" || echo "NOSCRIPT-BUTTON not in the toolbar state"
   else
     echo "no prefs.js in the profile"
   fi
   echo "-- Mullvad extension permissions (preset)"
   echo "extension-preferences.json: $([ -e "$P/extension-preferences.json" ] && echo "still there" || echo "taken over (gone)")"
-  ls "$P/extension-store" 2>/dev/null | tr '\n' ' '
-  echo
-  st=$(grep -a -o -e 'd19a89b9-76c1-4a61-bcd4-49e8de916403' -e '"proxy"' -e '<all_urls>' "$P"/extension-store/* 2>/dev/null | sed 's/^[^:]*://' | sort -u | tr '\n' ' ')
-  echo "extension-store: ${st:-nothing}"
-  case $st in
-    *d19a89b9*proxy*|*proxy*d19a89b9*) echo "MULLVAD-EXT-PERMS stored" ;;
-    *) echo "MULLVAD-EXT-PERMS not seen" ;;
-  esac
-  echo "-- script test (local page http://127.0.0.1:8088/, green = blocked, red = ran)"
-  journalctl -b -o cat --no-pager -g '^jstest request: ' | cut -c1-120
-  if journalctl -b -o cat --no-pager -g '^jstest request: GET /js-ran ' | grep . >/dev/null; then
-    echo "SCRIPT-TEST ran"
-  elif journalctl -b -o cat --no-pager -g '^jstest request: GET / ' | grep . >/dev/null; then
-    echo "SCRIPT-TEST blocked"
-  else
-    echo "SCRIPT-TEST no-page"
   fi
   echo "-- network"
   ip -br addr | cut -c1-110
@@ -289,7 +409,7 @@ sleep 15
   echo "-- errors of this boot"
   journalctl -b -p err --no-pager -o cat -n 12 | cut -c1-200
   echo "-- versions"
-  rpm -q mullvad-browser cage xorg-x11-server-Xwayland kernel-core | tr '\n' ' '
+  rpm -q mullvad-browser brave-browser cage xorg-x11-server-Xwayland kernel-core | tr '\n' ' '
   echo
   # probes, only when the host asked for them (browsevm.sh report with
   # BROWSEVM_REPORT_PROBE: an SMBIOS OEM string "browsevm-probe <ip>:<port> ..."):
@@ -337,89 +457,35 @@ WantedBy=multi-user.target
 UNIT
 systemctl enable browsevm-report.service >/dev/null 2>&1
 
-# report runs only: a local test page that shows whether JavaScript runs. Served on
-# 127.0.0.1:8088 by a socket unit that is never enabled (one tiny service per request,
-# DynamicUser, request lines to the journal). Its script, when it runs, turns the page
-# red and asks for /js-ran: the report reads that from the journal.
-mkdir -p /usr/share/browsevm /usr/local/libexec
-cat > /usr/share/browsevm/jstest.html <<'HTML'
-<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>browsevm script test</title>
-<style>html,body{margin:0;height:100%;background:#1e7d32;color:#fff;font:bold 44px sans-serif}
-#t{padding:80px}</style></head>
-<body><div id="t">JavaScript blocked: this page stays green</div>
-<noscript><img src="/noscript-shown" alt=""></noscript>
-<script>
-document.body.style.background = "#b71c1c";
-document.getElementById("t").textContent = "JavaScript RAN: the security level is Standard";
-new Image().src = "/js-ran";
-</script>
-</body></html>
-HTML
-cat > /usr/local/libexec/browsevm-jstest <<'SRV'
+# which browser this start: the host puts "browsevm-browser mullvad|brave" into an SMBIOS
+# OEM string of the domain (browsevm-ctl, at every start). Read by root before cage
+# starts (the DMI table is root's), written to /run/browsevm-browser for the kiosk.
+# Anything else, or nothing: Mullvad Browser.
+cat > /usr/local/sbin/browsevm-select <<'SELECT'
 #!/bin/bash
-IFS= read -r -t 5 line || exit 0
-line=${line%$'\r'}
-echo "jstest request: ${line:0:100}" >&2
-while IFS= read -r -t 2 h && [ -n "${h%$'\r'}" ]; do :; done
-f=/usr/share/browsevm/jstest.html
-case $line in
-  "GET / "*)
-    printf 'HTTP/1.0 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nContent-Length: %s\r\nConnection: close\r\n\r\n' "$(stat -c %s "$f")"
-    cat "$f" ;;
-  *)
-    printf 'HTTP/1.0 204 No Content\r\nConnection: close\r\n\r\n' ;;
-esac
-SRV
-chmod 0755 /usr/local/libexec/browsevm-jstest
-cat > /etc/systemd/system/browsevm-jstest.socket <<'UNIT'
+b=$(tr -c '[:print:]' '\n' < /sys/firmware/dmi/entries/11-0/raw 2>/dev/null |
+    grep -o 'browsevm-browser [a-z]*' | head -n 1)
+b=${b#browsevm-browser }
+case $b in brave) ;; *) b=mullvad ;; esac
+echo "$b" > /run/browsevm-browser
+chmod 0644 /run/browsevm-browser
+SELECT
+chmod 0755 /usr/local/sbin/browsevm-select
+cat > /etc/systemd/system/browsevm-select.service <<'UNIT'
 [Unit]
-Description=browsevm: local script test page (report runs only, never enabled)
-
-[Socket]
-ListenStream=127.0.0.1:8088
-Accept=yes
-UNIT
-cat > /etc/systemd/system/browsevm-jstest@.service <<'UNIT'
-[Unit]
-Description=browsevm: local script test page, one request
-
-[Service]
-ExecStart=/usr/local/libexec/browsevm-jstest
-StandardInput=socket
-StandardOutput=socket
-StandardError=journal
-DynamicUser=yes
-NoNewPrivileges=yes
-ProtectSystem=strict
-ProtectHome=yes
-PrivateTmp=yes
-RuntimeMaxSec=20
-UNIT
-# a report run = the domain has a serial port: flag for the kiosk, test page up,
-# before cage starts
-cat > /usr/local/sbin/browsevm-reportmode <<'MODE'
-#!/bin/bash
-( : > /dev/ttyS0 ) 2>/dev/null || exit 0
-: > /run/browsevm-report-mode
-systemctl start --no-block browsevm-jstest.socket
-MODE
-chmod 0755 /usr/local/sbin/browsevm-reportmode
-cat > /etc/systemd/system/browsevm-reportmode.service <<'UNIT'
-[Unit]
-Description=browsevm: report run (a serial port): test page for the kiosk
+Description=browsevm: browser of this start (SMBIOS OEM string from the host)
 Before=cage@tty1.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/sbin/browsevm-reportmode
+ExecStart=/usr/local/sbin/browsevm-select
 
 [Install]
 WantedBy=graphical.target
 UNIT
-systemctl enable browsevm-reportmode.service >/dev/null 2>&1
-restorecon -RF /usr/local/sbin /usr/local/bin /usr/local/libexec /usr/share/browsevm \
-  /etc/systemd/system /etc/pam.d/cage /home/web 2>/dev/null
+systemctl enable browsevm-select.service >/dev/null 2>&1
+restorecon -RF /usr/local/sbin /usr/local/bin /etc/systemd/system /etc/pam.d/cage \
+  /etc/brave /home/web 2>/dev/null
 
 # the base is updated by the host admin only; every start is a throwaway overlay
 systemctl disable dnf-makecache.timer 2>/dev/null
@@ -428,7 +494,7 @@ firewall-offline-cmd --set-default-zone=drop >/dev/null
 mkdir -p /etc/systemd/journald.conf.d
 printf '[Journal]\nStorage=volatile\n' > /etc/systemd/journald.conf.d/browsevm.conf
 
-for p in cage mullvad-browser xorg-x11-server-Xwayland gtk3 pipewire wireplumber mesa-dri-drivers \
+for p in cage mullvad-browser brave-browser xorg-x11-server-Xwayland gtk3 pipewire wireplumber mesa-dri-drivers \
          firefox openssh-server qemu-guest-agent spice-vdagent; do
   if rpm -q "$p" >/dev/null 2>&1; then say "pkg $p yes"; else say "pkg $p no"; fi
 done
@@ -437,7 +503,7 @@ say "firewall default zone $(firewall-offline-cmd --get-default-zone)"
 say "default target $(systemctl get-default)"
 say "cage unit $(systemctl is-enabled cage@tty1.service)"
 say "consoles kmsconvt@ $(systemctl is-enabled kmsconvt@tty1.service 2>&1 | tail -n 1), getty@ $(systemctl is-enabled getty@tty1.service 2>&1 | tail -n 1), serial-getty@ $(systemctl is-enabled serial-getty@ttyS0.service 2>&1 | tail -n 1)"
-say "report unit $(systemctl is-enabled browsevm-report.service 2>&1 | tail -n 1), report mode unit $(systemctl is-enabled browsevm-reportmode.service 2>&1 | tail -n 1), test page socket $(systemctl is-enabled browsevm-jstest.socket 2>&1 | tail -n 1)"
+say "report unit $(systemctl is-enabled browsevm-report.service 2>&1 | tail -n 1), browser select unit $(systemctl is-enabled browsevm-select.service 2>&1 | tail -n 1)"
 say "kiosk script $(test -x /usr/local/bin/browsevm-kiosk && echo present || echo MISSING)"
 say "release $(sed -n 's/^PRETTY_NAME=//p' /etc/os-release)"
 say "post done"

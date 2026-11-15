@@ -1,0 +1,15 @@
+# browsevm-update.timer - once a day: browsevm-update.service rebuilds the base image
+# when it is BROWSEVM_MAX_AGE_DAYS old (docs/browsevm.md). Persistent: a day missed while
+# the laptop was off runs at the next start (after 15 min).
+
+[Unit]
+Description=browsevm: daily check whether the base image needs a rebuild
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=2h
+Persistent=true
+OnBootSec=15min
+
+[Install]
+WantedBy=timers.target

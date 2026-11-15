@@ -3,13 +3,17 @@
 # browsevm-ctl - start / stop the throwaway browsing VM (docs/browsevm.md)
 #
 # Installed as /usr/local/sbin/browsevm-ctl by "browsevm.sh install". Run as root by
-# browsevm.service only: the daily user starts / stops that unit (polkit rule) and never
-# talks to libvirt itself (libvirt access = root).
+# browsevm@<browser>.service only: the daily user starts / stops those units (polkit
+# rule) and never talks to libvirt itself (libvirt access = root).
 #
-#   browsevm-ctl start   a tmpfs for the VM's disk, new empty overlay on the base image
-#                        in it, network "browse" up, /run/browsevm for the SPICE socket,
-#                        virsh start, socket handed to the viewing user (group, 0660, the
-#                        VM's MCS pair)
+#   browsevm-ctl start <mullvad|brave>
+#                        the browser into the domain's SMBIOS OEM string (the guest's
+#                        kiosk runs that one), a tmpfs for the VM's disk, new empty
+#                        overlay on the base image in it, network "browse" up,
+#                        /run/browsevm for the SPICE socket, virsh start, socket handed
+#                        to the viewing user (group, 0660, the VM's MCS pair). Refused
+#                        while the base image is being rebuilt (browsevm.sh build /
+#                        update hold BUILD_LOCK).
 #   browsevm-ctl stop    virsh shutdown, destroy after STOP_SECS, tmpfs unmounted (the
 #                        overlay with it), base image back to root 0600 + its file
 #                        context, network down, /run/browsevm removed
@@ -35,6 +39,8 @@ QEMU_USER=qemu                           # user of the QEMU process (qemu.conf d
 SOCK_TYPE=qemu_var_run_t                 # svirt_t may create a socket in a dir of this type
 SOCK_WAIT=30                             # x 0.5 s
 STOP_SECS=20
+BUILD_LOCK=/run/browsevm-build.lock      # held by browsevm.sh build / update (same path there)
+BROWSERS=(mullvad brave)
 V=(virsh -q -c qemu:///system)
 
 say() { printf 'browsevm-ctl: %s\n' "$*"; }
@@ -124,19 +130,44 @@ down() {
   base_at_rest
 }
 
+# the browser of the next start: the domain's own OEM string, changed in its persistent
+# definition (whatever else that definition holds stays, a report run's serial port too)
+set_browser() {
+  local b=$1 x
+  x=$(mktemp) || return 1
+  if ! "${V[@]}" dumpxml --inactive "$DOM" > "$x" ||
+     ! grep "<entry>browsevm-browser [a-z]*</entry>" "$x" >/dev/null; then
+    rm -f "$x"; say "the domain has no browser entry: browsevm.sh install"; return 1
+  fi
+  sed -i "s|<entry>browsevm-browser [a-z]*</entry>|<entry>browsevm-browser $b</entry>|" "$x"
+  "${V[@]}" define "$x" >/dev/null || { rm -f "$x"; return 1; }
+  rm -f "$x"
+}
+
+running_browser() {
+  "${V[@]}" dumpxml "$DOM" 2>/dev/null | sed -n 's|.*<entry>browsevm-browser \([a-z]*\)</entry>.*|\1|p' | head -n 1
+}
+
 cmd_start() {
-  local gid st
+  local b=${1:-} gid st x ok=0
+  for x in "${BROWSERS[@]}"; do [[ $b == "$x" ]] && ok=1; done
+  ((ok)) || die "usage: browsevm-ctl start <${BROWSERS[*]}>"
   gid=$(view_gid) || exit 1
   id "$QEMU_USER" >/dev/null 2>&1 || die "no user $QEMU_USER"
   st=$(state)
   case $st in
-    running)    hand_over "$gid" || die "running, but no socket $SOCK (stop it first)"
+    running)    [[ $(running_browser) == "$b" ]] || die "running with $(running_browser): stop it first"
+                hand_over "$gid" || die "running, but no socket $SOCK (stop it first)"
                 say "already running"; return 0 ;;
     "shut off") ;;
     gone)       die "domain $DOM missing: browsevm.sh install" ;;
     *)          die "domain state '$st': stop it first" ;;
   esac
   [[ -f $BASE ]] || die "$BASE missing: browsevm.sh build"
+  # a build replaces the base while it runs: never start on a half-written image
+  exec 7>> "$BUILD_LOCK" || die "cannot open $BUILD_LOCK"
+  flock -n -s 7 || die "the base image is being rebuilt (browsevm.sh build / update): try again later"
+  set_browser "$b" || die "could not set the browser ($b) in the domain"
 
   # a new empty overlay in a new tmpfs: the VM's only writable disk. A leftover tmpfs
   # (the VM died without a stop) is unmounted first.
@@ -167,7 +198,7 @@ cmd_start() {
     down
     die "no SPICE socket $SOCK after $((SOCK_WAIT / 2)) s"
   fi
-  say "started (new overlay in RAM), socket $SOCK"
+  say "started with $b (new overlay in RAM), socket $SOCK"
 }
 
 cmd_stop() {
@@ -191,9 +222,9 @@ cmd_stop() {
   say "stopped (overlay gone with its tmpfs)"
 }
 
-[[ $EUID -eq 0 ]] || die "run as root (by browsevm.service)"
+[[ $EUID -eq 0 ]] || die "run as root (by browsevm@<browser>.service)"
 case "${1:-}" in
-  start) cmd_start ;;
+  start) cmd_start "${2:-}" ;;
   stop)  cmd_stop ;;
-  *)     echo "usage: browsevm-ctl start|stop" >&2; exit 2 ;;
+  *)     echo "usage: browsevm-ctl start <${BROWSERS[*]}> | stop" >&2; exit 2 ;;
 esac

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=browsevm Brave
+GenericName=Throwaway browser
+Comment=Random links in a throwaway VM with Brave: nothing is kept after the window is closed
+Exec=/usr/local/bin/browsevm brave
+Icon=virt-viewer
+Terminal=false
+Categories=Network;
+StartupNotify=false

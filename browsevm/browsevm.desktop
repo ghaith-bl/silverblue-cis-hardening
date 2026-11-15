@@ -1,9 +1,9 @@
 [Desktop Entry]
 Type=Application
-Name=browsevm
+Name=browsevm Mullvad
 GenericName=Throwaway browser
-Comment=Random links in a throwaway VM: nothing is kept after the window is closed
-Exec=/usr/local/bin/browsevm
+Comment=Random links in a throwaway VM with Mullvad Browser: nothing is kept after the window is closed
+Exec=/usr/local/bin/browsevm mullvad
 Icon=virt-viewer
 Terminal=false
 Categories=Network;

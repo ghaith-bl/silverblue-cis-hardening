@@ -3,11 +3,13 @@
 Status: step 1 (network) in `harden-workstation.sh browsevm`; step 2 (base image) in
 `browsevm/browsevm.sh build`; step 3 (domain, unit, polkit rule, launcher) in
 `browsevm/browsevm.sh install`; step 4 (checks) in `browsevm/browsevm.sh report` and the
-list below. Step 5 (README, deviations, rollback, verification) not done yet.
+list below; updates in `browsevm/browsevm.sh update` + a daily timer. Step 5 (README,
+deviations, rollback, verification) not done yet.
 
 ## Goal
 - random links never reach the daily user's files or the system
-- a browser only (Mullvad Browser), sound on, 4 GiB RAM, CPU graphics (no GPU)
+- a browser only (Mullvad Browser or Brave, chosen per start), sound on, 4 GiB RAM, CPU
+  graphics (no GPU)
 - nothing leaves the VM: no clipboard, no shared folder, no USB, no file export
 - refs: NIST SP 800-53 SC-44 (detonation chambers), SC-39 (process isolation), AC-6;
   CIS Controls v8 Control 9 (email and web browser protections); Qubes OS disposable VMs
@@ -20,14 +22,16 @@ list below. Step 5 (README, deviations, rollback, verification) not done yet.
   an escape = the daily user's files
 
 ## Shape
-- guest: Fedora minimal + `cage` (Wayland kiosk) + Mullvad Browser full screen, auto login
-  of a user without sudo. The browser as shipped, security level Safer. Nothing else
+- guest: Fedora minimal + `cage` (Wayland kiosk) + one browser full screen, auto login of
+  a user without sudo: Mullvad Browser (as shipped, security level Safer) or Brave
+  (managed policies), the host picks per start (two app grid entries). Nothing else
 - disk: base image `/var/lib/libvirt/images/browsevm-base.qcow2`, never the VM's own
   disk. The VM runs on a qcow2 overlay made new at every start, in RAM (tmpfs), gone at
   stop: every start is clean, downloads / cookies / malware gone at power off and never
   on the disk. The base is read-only for the VM (SELinux label, below)
-- updates: admin only: a new base built from the kept ISO (`build --force --iso`, about
-  10 min). Weekly or after a Mullvad Browser release
+- updates: a new base built from the kept ISO (`update`, about 10 min, both browsers and
+  Fedora at their newest): `browsevm-update.timer` checks daily, rebuilds when the base
+  is 7 days old (below)
 - 4 GiB RAM, 2 vCPU, base disk ~12 GiB
 - removed: spice-vdagent / spicevmc channel (clipboard), virtiofs / 9p, USB redirection,
   smartcard, GL. Sound: ich9 + SPICE audio (the host has no capture nodes: `mic` section)
@@ -59,13 +63,15 @@ BROWSEVM_FEDORA=44 sudo -E browsevm/browsevm.sh build   # other release
   (QEMU never opens a file itself), `--noreboot`; the kickstart powers off. Build domain
   undefined after, disk kept
 - progress line every 20 s: minutes, disk size, last installer line (Ctrl+C: domain destroyed)
-- refused while the VM runs (`browsevm.service` active) or while any domain's XML names
-  the base (a running VM: its overlay's backing file; an old definition with the base as
-  its disk): stop / undefine first
+- refused while the VM runs (`browsevm@<browser>.service` active) or while any domain's
+  XML names the base (a running VM: its overlay's backing file; an old definition with
+  the base as its disk): stop / undefine first. Holds `/run/browsevm-build.lock` (flock):
+  no VM start (`browsevm-ctl`, the launcher) while the base is being replaced
+- `/run/browsevm-last-build`: path of this build's serial log (for `update`)
 - before anything is touched: install tree reachable (6 tries, 10 s apart: a VPN that
   just reconnected), speed probe (`images/pxeboot/vmlinuz` of the tree; under
-  `BROWSEVM_MIN_KBPS`, 200 KB/s, it stops), Mullvad's rpm repository reachable. Only then
-  the old base is moved to `.old`
+  `BROWSEVM_MIN_KBPS`, 200 KB/s, it stops), Mullvad's and Brave's rpm repositories
+  reachable. Only then the old base is moved to `.old`
 - network `browse` during the install (started and stopped again if it was off):
   packages come through Mullvad like any VM traffic
 - kickstart: Fedora `@core` + cage + Xwayland + gtk3 and the other libraries a Firefox
@@ -75,7 +81,7 @@ BROWSEVM_FEDORA=44 sudo -E browsevm/browsevm.sh build   # other release
   enforcing, firewalld zone drop, no sshd, dnf-makecache off, journal volatile, UTC,
   no IPv6
 - kiosk: `cage@tty1.service` (cage wiki unit, `PAMName=cage`) runs
-  `/usr/local/bin/browsevm-kiosk`: the browser full screen, in the foreground for as long
+  `/usr/local/bin/browsevm-kiosk`: the chosen browser full screen, in the foreground for as long
   as one of its processes lives (its start script may detach), then cage ends and the
   unit starts both again (`RestartSec=2`). CPU renderer (`WLR_RENDERER=pixman`), keyboard us + ara
   (Alt+Shift). `NoNewPrivileges=yes`: nothing the browser starts gains privileges through
@@ -100,9 +106,31 @@ BROWSEVM_FEDORA=44 sudo -E browsevm/browsevm.sh build   # other release
   TLS, as in Mullvad's guide). Not installed = `BROWSEVM: MISSING mullvad-browser`
 - X11 on cage's Xwayland: the browser's own default (the Tor Project keeps Wayland off
   in it); without Xwayland the kiosk script sets `MOZ_ENABLE_WAYLAND=1`
+- second browser: Brave (Chromium; fingerprint randomized per site and session instead
+  of one look for everybody: more sites work, where Mullvad Browser's protections or its
+  shared look break them). Installed the way Brave documents it for Fedora Atomic: repo
+  file `brave-browser-rpm-release.s3.brave.com/brave-browser.repo` into
+  `/etc/yum.repos.d`, `dnf install brave-browser`; same `gpgcheck=1` / `gpgkey` rules.
+  Not installed = `BROWSEVM: MISSING brave-browser`
+- Brave policies `/etc/brave/policies/managed/browsevm.json`: the host's
+  `browsers/brave/policies.json` without its extension allowlist (no extension at all)
+  plus `DefaultJavaScriptJitSetting` 2 and `DefaultJavaScriptOptimizerSetting` 2 (V8 JIT
+  and optimizers off on every site: Brave's "Safer"; JIT off = slower JavaScript, fewer
+  exploitable engine paths). Nothing sent by itself: P3A, usage ping, Web Discovery
+  (sends browsing data to build Brave Search's index), metrics / crash reports, surveys
+  all off; Rewards, Wallet, VPN, Leo, News, Talk, Tor windows off; Shields aggressive,
+  HTTPS only, WebRTC `disable_non_proxied_udp`, no sign-in / sync / passwords / autofill
+- Brave in the kiosk: `brave-browser --no-first-run --no-default-browser-check
+  --disable-gpu --ozone-platform=x11 --user-data-dir=/home/web/.browsevm/brave` (Wayland
+  without Xwayland), throwaway like the rest. Its sandbox: user namespaces (the setuid
+  helper is useless under `NoNewPrivileges`)
+- which one: `browsevm-select.service` (root, before cage) reads the SMBIOS OEM string
+  `browsevm-browser mullvad|brave` (`/sys/firmware/dmi/entries/11-0/raw`, root only),
+  writes `/run/browsevm-browser` (0644) for the kiosk; nothing / anything else = Mullvad
 - to expect: letterboxing (grey margins around the page), English for web pages asked
   at first start, a site may break under its fingerprinting protection, a black screen
-  for up to a minute after the start (the browser's first start is headless, below)
+  for up to a minute after the start (the browser's first start is headless, below).
+  Such a site: try it in Brave
 
 ## Security level Safer
 - the browser's own security level (shield icon), the Tor Project's three levels:
@@ -110,10 +138,8 @@ BROWSEVM_FEDORA=44 sudo -E browsevm/browsevm.sh build   # other release
   fonts and math symbols off, audio / video click to play, everywhere), Safest (also
   JavaScript off on every site). browsevm: Safer at every start (Safest breaks most
   sites)
-- a site that needs JavaScript over plain http: NoScript button in the toolbar ->
-  `Temp. TRUSTED` for that site. Session only: gone when the browser closes (cage starts
-  it again) and with the VM's disk at stop. A temp-trusted site runs JavaScript with the
-  other Safer limits (no JIT: slower)
+- NoScript (shipped) is what applies the level: it stays; its toolbar button stays
+  hidden (the Tor Project's default, tor-browser#41581). A site that breaks: Brave
 - Safer is a level the browser offers to all its users: who uses it looks like the others
   at Safer (a smaller crowd than Standard; the attack surface is what counts here: random
   links, JIT bugs are a common browser exploit path)
@@ -123,10 +149,7 @@ BROWSEVM_FEDORA=44 sudo -E browsevm/browsevm.sh build   # other release
   ```
   user_pref("browser.security_level.security_slider", 2);   // 4 Standard, 2 Safer, 1 Safest
   user_pref("browser.security_level.security_custom", false);
-  user_pref("extensions.hideNoScript", false);                // NoScript button shown
   ```
-  `extensions.hideNoScript`: the Tor Project hides NoScript's button by default
-  (tor-browser#41581, MR 816); false = in the toolbar of a new profile
 - first start of every VM start is headless (`--headless about:blank`, closed with TERM
   once `extensions.json` is written + 8 s, KILL after 20 s more): a level set before the
   first start of a new profile was only applied after a restart (Tor forum: Tor Browser
@@ -135,7 +158,9 @@ BROWSEVM_FEDORA=44 sudo -E browsevm/browsevm.sh build   # other release
 - changing the level by hand in the VM needs the browser's restart (Privacy Guides 2025:
   the slider is only fully applied after a restart): close the browser, cage starts it
   again with the `user.js` level (Safer). So the level in the VM is always Safer
-- checked in every report run: a local test page over http (below) must stay green
+- checked in every report run: `prefs.js` line `security_slider", 2` (below). The first
+  report runs (2026-11-14) also opened a local http test page: JavaScript blocked on the
+  first window of a new VM
 
 ## Mullvad Browser Extension: permissions given in the image
 - shipped with the browser, on by default. Its proxy feature (Mullvad SOCKS proxy per site
@@ -149,10 +174,10 @@ BROWSEVM_FEDORA=44 sudo -E browsevm/browsevm.sh build   # other release
   Firefox keeps granted optional permissions in the profile's `extension-store`; a new
   profile takes them over once from this file (the older store's format). Firefox only
   uses stored permissions the extension's manifest lists as optional (Mozilla bug
-  1766915)
+  1766915). Mullvad Browser 16.0.1 reads this file in place (no `extension-store` was
+  made): proxy settings opened without a prompt (2026-11-14)
 - the build prints the shipped extensions (`distribution/extensions/*.xpi`, the file
-  name is the add-on ID); the report prints whether the file was taken over and what
-  `extension-store` holds (`MULLVAD-EXT-PERMS stored`)
+  name is the add-on ID); the report prints whether the file is still there
 - the extension then reaches `api.mullvad.net` (proxy list) and `am.i.mullvad.net`
   (connection check) when its popup opens, like everywhere else
 - result lines `BROWSEVM:` (browser version, missing libraries, packages yes / no, SELinux,
@@ -167,14 +192,17 @@ BROWSEVM_FEDORA=44 sudo -E browsevm/browsevm.sh build   # other release
 sudo rpm-ostree install virt-viewer && systemctl reboot   # remote-viewer, once
 sudo DAILY_USER=<daily user> browsevm/browsevm.sh install # again after a change; VM off
 ```
-Daily user: app grid `browsevm` (or `browsevm` in a terminal). Window closed = VM stopped.
+Daily user: app grid `browsevm Mullvad` / `browsevm Brave` (or `browsevm [mullvad|brave]`
+in a terminal). Window closed = VM stopped.
 - domain `browsevm` (`browsevm/domain.xml`, copy of what was defined in
   `/etc/browsevm/domain.xml`): 4 GiB, 2 vCPU, host-passthrough CPU, virtio disk + net,
   virtio-gpu 1920x1080 (no GL), virtio tablet (pointer without an agent), ich9 sound with
   the output codec only + SPICE audio, virtio rng. `<controller type='usb' model='none'/>`
   (no USB, so no redirection), `<memballoon model='none'/>`, no serial console, no
   channels (vdagent, guest agent), no shares. SPICE: `<clipboard copypaste='no'/>`,
-  `<filetransfer enable='no'/>`, image compression off (local socket)
+  `<filetransfer enable='no'/>`, image compression off (local socket). `<sysinfo
+  type='smbios'><oemStrings><entry>browsevm-browser mullvad</entry>` + `<os><smbios
+  mode='sysinfo'/>`: the browser of the next start
 - disk: `/var/lib/libvirt/browsevm-run/browsevm-run.qcow2`, a qcow2 overlay with the
   base as backing file (`qemu-img create -f qcow2 -F qcow2 -b <base>`) on a tmpfs that
   `browsevm-ctl` mounts at start (`size=2g`, nosuid, nodev, noexec, root directory
@@ -186,9 +214,12 @@ Daily user: app grid `browsevm` (or `browsevm` in a terminal). Window closed = V
   the base is the domain's disk there, so it kept the VM's read-write label
   (`svirt_image_t` + the VM's MCS pair, owner `qemu`) while the VM ran and after it
   stopped: a taken-over QEMU process could have changed the base for every later start
-- `browsevm.service` (oneshot, `RemainAfterExit`, never enabled) runs
-  `/usr/local/sbin/browsevm-ctl` as root. start: tmpfs + new overlay, network `browse`
-  up if off, `/run/browsevm`, `virsh start`, socket handed over. stop: `virsh shutdown`,
+- `browsevm@.service` (instances `browsevm@mullvad`, `browsevm@brave`; oneshot,
+  `RemainAfterExit`, never enabled) runs `/usr/local/sbin/browsevm-ctl` as root. start
+  `<browser>`: refused while a build holds the lock or the VM runs with the other
+  browser; the browser into the domain's OEM string (`virsh dumpxml --inactive`, `sed`
+  on the entry, `virsh define`: a report run's serial port stays), tmpfs + new overlay,
+  network `browse` up if off, `/run/browsevm`, `virsh start`, socket handed over. stop: `virsh shutdown`,
   destroy after 20 s, tmpfs unmounted, base back to root 0600 `virt_image_t`, network down
   (unless a build uses it), `/run/browsevm` removed. A failed start leaves nothing behind
 - SPICE socket `/run/browsevm/spice.sock`: made by QEMU itself (user `qemu`, `svirt_t`),
@@ -200,15 +231,18 @@ Daily user: app grid `browsevm` (or `browsevm` in a terminal). Window closed = V
   pair) cannot. Who connects owns the VM's screen and keyboard, nothing on the host. No
   TCP listener, no password needed
 - polkit rule `/etc/polkit-1/rules.d/60-browsevm.rules`: the daily user may `start`
-  `browsevm.service` from a local active session and `stop` it from anywhere (logout,
+  `browsevm@mullvad.service` / `browsevm@brave.service` from a local active session and
+  `stop` them from anywhere (logout,
   session closing; `org.freedesktop.systemd1.manage-units`, `action.lookup("unit")`,
   `("verb")`). No other unit, no restart / enable, no libvirt group (= root-equivalent). The user name
   comes from `DAILY_USER` at install (`/etc/browsevm/view-user`), not from the repo
-- `/usr/local/bin/browsevm` (desktop entry `browsevm`): `systemctl start`, then
-  `remote-viewer --title browsevm --spice-disable-usbredir spice+unix:///run/browsevm/spice.sock`, then
-  `systemctl stop` when the window closes. One window at a time (lock). A VM left
+- `/usr/local/bin/browsevm [mullvad|brave]` (desktop entries `browsevm Mullvad`,
+  `browsevm Brave`): `systemctl start browsevm@<browser>`, then `remote-viewer --title
+  "browsevm <browser>" --spice-disable-usbredir spice+unix:///run/browsevm/spice.sock`,
+  then `systemctl stop` when the window closes. One window at a time (lock). A VM left
   running without a window (logout, crash of the viewer) is stopped first: every window
-  is a new clean VM
+  is a new clean VM. While the base is rebuilt (build lock taken): a note, no start
+- install removes an old `browsevm.service` (before 2026-11-15: one browser)
 - the guest's size is fixed (1920x1080, no agent to resize it): the viewer scales it
 - links: typed in the VM. No way to hand one over from the host (no clipboard, by design)
 - GNOME asks once "Allow inhibiting shortcuts" for Remote Viewer: Allow = Alt+Tab, Super
@@ -236,34 +270,29 @@ Daily user: app grid `browsevm` (or `browsevm` in a terminal). Window closed = V
 
 ## Looking inside (report)
 ```
-sudo browsevm/browsevm.sh report     # VM off; about 3 min
+sudo browsevm/browsevm.sh report            # VM off; Mullvad Browser; about 3 min
+sudo browsevm/browsevm.sh report brave      # the same with Brave
 ```
 - nobody can log in to the VM. The image's `browsevm-report.service` writes the kiosk's
-  state to the first serial port once the test page was asked for (1-3 min after boot):
-  cage unit + its journal, SELinux label and no_new_privs of cage / the browser, X11 or
-  Wayland, sessions, consoles, AVC denials, security level, script test, network, sound
-  cards, errors
-- security level: seconds of the headless first start (ended by TERM / KILL), the
-  browser's command line (`--profile`), `prefs.js` lines `security_level` /
-  `hideNoScript`, `NOSCRIPT-BUTTON toolbar` when NoScript's button is in the toolbar state
-- script test: `browsevm-reportmode.service` (only when the domain has a serial port,
-  before cage) flags the run (`/run/browsevm-report-mode`) and starts
-  `browsevm-jstest.socket` (127.0.0.1:8088, never enabled; one `DynamicUser` service per
-  request, request lines to the journal). The kiosk opens that page: green text, and a
-  script that turns it red and asks for `/js-ran`. `SCRIPT-TEST blocked` = page asked
-  for, no `/js-ran` (an http page: blocked at Safer and Safest; which one = the
-  `prefs.js` line `security_slider", 2` for Safer); `ran` = the script ran (Standard); `no-page` =
-  the browser never asked for it. The screenshot shows the page
+  state to the first serial port once the browser's window is up (1-3 min after boot):
+  `BROWSER <name>`, cage unit + its journal, SELinux label and no_new_privs of cage / the
+  browser, X11 or Wayland, sessions, consoles, AVC denials, the browser's own section,
+  network, sound cards, errors, versions
+- Mullvad Browser: seconds of the headless first start (ended by TERM / KILL), its
+  command line (`--profile`), `prefs.js` lines `security_level`, whether
+  `extension-preferences.json` is there
+- Brave: its command line, number of policy keys, the JIT / optimizer / telemetry lines of
+  the policy file, `BRAVE-PROFILE present` (its data directory was made)
 - the browsing domain has no serial port: the open fails, nothing is sent. `report`
   defines the domain once with a serial port (logged by virtlogd to
   `/var/log/libvirt/qemu/browsevm-report.serial.log`), starts it through the unit, prints
   the report, stops it, defines the normal domain again
 - probes (step 4): `BROWSEVM_REPORT_PROBE="<ip>:<port> ..."` puts the targets into an
-  SMBIOS OEM string of that one start (`<sysinfo type='smbios'><oemStrings>`, `<smbios
-  mode='sysinfo'/>`); the guest reads `/sys/firmware/dmi/entries/11-0/raw`. Per target one
+  SMBIOS OEM string of that one start (one more `<entry>` next to the browser's); the
+  guest reads `/sys/firmware/dmi/entries/11-0/raw`. Per target one
   TCP connect (`PROBE lateral <target> OPEN|closed|timeout`), then 30 rounds (`PROBE round
   <n> start <epoch> mullvad-check ok|fail tcp-443 ok|fail`: `am.i.mullvad.net/connected`
-  says connected, TCP to its address without DNS). The normal domain has no OEM string:
+  says connected, TCP to its address without DNS). The normal domain has no probe entry:
   nothing is probed
 - known lines, harmless: `virt/tdx: TDX not supported by the host platform` (kernel, no
   TDX on this CPU); AVC `rtkit-daemon setsched` on `unconfined_service_t` + `Failed to
@@ -288,10 +317,37 @@ Admin, VM off. One report run with probes, then one normal start:
   `ok` again after the connect. hostfw `fwd_vm_new` grows with the VM's flows
 - sectop: the firewall screen shows the VM's flows (`fwd_vm_new` lines from the browse
   /24, the counter card); looked at by hand during a session
-- security level: `SCRIPT-TEST blocked`, `security_slider", 2` in `prefs.js`,
-  `NOSCRIPT-BUTTON toolbar`, screenshot = green page
-- Mullvad extension: `MULLVAD-EXT-PERMS stored`; in a session its proxy settings open
-  without a permission prompt
+- security level: `security_slider", 2` in `prefs.js` (2026-11-14 also: the http test
+  page stayed green on the first window)
+- Mullvad extension: in a session its proxy settings open without a permission prompt
+- Brave: `BROWSER brave`, `BRAVE-PROFILE present`, policy lines JIT / optimizer 2,
+  telemetry false; screenshot = Brave's new tab page
+
+## Updates
+```
+sudo browsevm/browsevm.sh update                 # now; old base back if it fails
+sudo browsevm/browsevm.sh update --if-older 7    # only when the base is 7 days old
+journalctl -u browsevm-update.service            # what the daily runs did
+cat /var/lib/browsevm/base.info                  # date + browser versions of the base
+```
+- nothing in the VM updates itself (every start is the base again): a new base is the
+  update. `update` = `build --force` from the newest kept
+  `Fedora-Everything-netinst-x86_64-<release>-*.iso` in `/var/lib/libvirt/images`
+  (installer only; packages, both browsers and their keys from the network: always the
+  newest), in a subshell, then: good (rc 0, `post done`, both browser lines) = `.old`
+  deleted, `base.info` written, versions before / now printed; not good = the old base
+  back (root 0600, its label). A stale `.old` from an older failed run is deleted first
+- `--if-older N`: the age from `base.info` (`built <epoch>`), else the file's mtime;
+  younger = exit 0. VM in use = exit 0 (the next day tries again)
+- `browsevm-update.timer`: `OnCalendar=daily`, `RandomizedDelaySec=2h`, `Persistent=true`,
+  `OnBootSec=15min` -> `browsevm-update.service` (oneshot, `Nice=10`, idle I/O,
+  `TimeoutStartSec=3h`) runs `/usr/local/lib/browsevm/browsevm.sh update --if-older 7`:
+  the root-owned copy that `install` puts there (with the kickstart), never the repo in a
+  home. Enabled by `install`; off: `sudo systemctl disable --now browsevm-update.timer`
+- Mullvad settings are not touched: the build runs with DAITA / multihop on (slower; under
+  `BROWSEVM_MIN_KBPS` it stops before anything is replaced and the next day tries again)
+- a new Fedora release: put its netinst ISO into `/var/lib/libvirt/images`, set
+  `BROWSEVM_FEDORA` (or the default in `browsevm.sh`), install again
 
 ## Residual risk
 - QEMU / KVM escape + SELinux bypass; CPU side channels
@@ -304,5 +360,6 @@ Admin, VM off. One report run with probes, then one normal start:
 3. domain XML (overlay disk, removed devices, sound), unit, polkit rule, desktop file
    (done)
 4. checks: `ps -Z` (svirt_t + MCS), overlay gone after shutdown, no clipboard, sectop flows,
-   lab VM and LAN unreachable, Mullvad disconnect = no internet (list above)
-5. README, deviations, rollback, verification rows
+   lab VM and LAN unreachable, Mullvad disconnect = no internet (list above) (done)
+5. Brave as the second browser, `update` + daily timer (2026-11-15)
+6. README, deviations, rollback, verification rows

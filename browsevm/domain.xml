@@ -16,6 +16,9 @@
   removed  USB controller (so no USB redirection), memory balloon, serial console,
            guest agent channel, shared folders, smartcard.
   machine  q35 + BIOS, the same as the build.
+  browser  SMBIOS OEM string "browsevm-browser mullvad|brave": browsevm-ctl sets it at
+           every start (from the unit instance browsevm@<browser>.service), the guest
+           reads it before its kiosk starts. One-way, from the host's own definition.
 -->
 <domain type='kvm'>
   <name>browsevm</name>
@@ -27,7 +30,13 @@
     <type arch='x86_64' machine='q35'>hvm</type>
     <boot dev='hd'/>
     <bootmenu enable='no'/>
+    <smbios mode='sysinfo'/>
   </os>
+  <sysinfo type='smbios'>
+    <oemStrings>
+      <entry>browsevm-browser mullvad</entry>
+    </oemStrings>
+  </sysinfo>
   <features>
     <acpi/>
     <apic/>

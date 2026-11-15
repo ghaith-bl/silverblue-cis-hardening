@@ -1,0 +1,19 @@
+# browsevm-update.service - rebuild the browsevm base image when it is a week old
+# (docs/browsevm.md). Started daily by browsevm-update.timer; installed and the timer
+# enabled by "browsevm.sh install". Runs the root-owned copy in /usr/local/lib/browsevm.
+# Nothing to do (base younger than BROWSEVM_MAX_AGE_DAYS, the VM in use): exits at once,
+# the next day tries again. A failed build keeps the old base.
+#   journalctl -u browsevm-update.service      what the last runs did
+
+[Unit]
+Description=browsevm: rebuild the base image when it is a week old
+After=network-online.target libvirtd.service virtqemud.socket
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=BROWSEVM_MAX_AGE_DAYS=7
+ExecStart=/usr/local/lib/browsevm/browsevm.sh update --if-older ${BROWSEVM_MAX_AGE_DAYS}
+TimeoutStartSec=3h
+Nice=10
+IOSchedulingClass=idle

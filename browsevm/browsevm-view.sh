@@ -3,10 +3,12 @@
 # browsevm - open the throwaway browsing VM in a window (docs/browsevm.md)
 #
 # Installed as /usr/local/bin/browsevm by "browsevm.sh install"; run by the daily user
-# (desktop entry "browsevm"), never as root.
+# (desktop entries "browsevm Mullvad", "browsevm Brave"), never as root.
 #
-# - starts browsevm.service (the polkit rule lets this user start / stop that unit and
-#   nothing else), opens the VM's SPICE socket with remote-viewer
+#   browsevm [mullvad|brave]     (default mullvad)
+#
+# - starts browsevm@<browser>.service (the polkit rule lets this user start / stop those
+#   units and nothing else), opens the VM's SPICE socket with remote-viewer
 # - window closed = VM stopped = its overlay deleted: nothing is kept
 # - a VM left running without a window (logout, crash) is never reused: stopped first,
 #   so every window is a new clean VM
@@ -14,8 +16,9 @@
 #
 set -uo pipefail
 
-UNIT=browsevm.service
+BROWSER=${1:-mullvad}
 SOCK=/run/browsevm/spice.sock
+BUILD_LOCK=/run/browsevm-build.lock   # held while the base image is rebuilt
 
 note() {
   printf 'browsevm: %s\n' "$*" >&2
@@ -25,6 +28,11 @@ note() {
 }
 
 [[ $EUID -ne 0 ]] || { echo "browsevm: run as the daily user, not root" >&2; exit 2; }
+case $BROWSER in
+  mullvad|brave) ;;
+  *) echo "usage: browsevm [mullvad|brave]" >&2; exit 2 ;;
+esac
+UNIT=browsevm@$BROWSER.service
 command -v remote-viewer >/dev/null ||
   { note "remote-viewer missing (rpm-ostree install virt-viewer, reboot)"; exit 1; }
 
@@ -40,12 +48,18 @@ finish() {
 trap finish EXIT
 trap 'exit 143' INT TERM HUP
 
-if systemctl is-active --quiet "$UNIT"; then
-  systemctl stop "$UNIT" || { note "an old VM is running and could not be stopped"; exit 1; }
+if [[ -e $BUILD_LOCK ]] && exec 7< "$BUILD_LOCK" && ! flock -n -s 7; then
+  note "the VM's image is being rebuilt (weekly update): try again in about 15 min"; exit 1
 fi
+exec 7<&-
+for u in browsevm@mullvad.service browsevm@brave.service; do
+  if systemctl is-active --quiet "$u"; then
+    systemctl stop "$u" || { note "an old VM is running and could not be stopped"; exit 1; }
+  fi
+done
 started=1
 systemctl start "$UNIT" || { note "could not start $UNIT (journalctl -u $UNIT)"; exit 1; }
 [[ -S $SOCK && -w $SOCK ]] || { note "no access to $SOCK"; exit 1; }
 
 # no USB redirection from this side either (the VM has no USB controller)
-remote-viewer --title browsevm --spice-disable-usbredir "spice+unix://$SOCK" 9>&-
+remote-viewer --title "browsevm $BROWSER" --spice-disable-usbredir "spice+unix://$SOCK" 9>&-

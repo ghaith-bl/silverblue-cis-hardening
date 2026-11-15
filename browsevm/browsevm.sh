@@ -4,14 +4,18 @@
 #
 #   sudo browsevm/browsevm.sh build [--force] [--iso <netinst.iso>]
 #                                        unattended install of the base image
+#   sudo browsevm/browsevm.sh update [--iso <netinst.iso>] [--if-older <days>]
+#                                        new base image, the old one kept if it fails
 #   sudo DAILY_USER=<daily user> browsevm/browsevm.sh install
-#                                        domain, start / stop unit, polkit rule, launcher
-#   sudo browsevm/browsevm.sh report     one start with a serial port: the kiosk's own state
+#                                        domain, units, polkit rule, launchers, update timer
+#   sudo browsevm/browsevm.sh report [mullvad|brave]
+#                                        one start with a serial port: the kiosk's own state
 #
-# build: Fedora minimal + cage + Mullvad Browser from browsevm.ks, network "browse"
-# (section browsevm). The browser comes from Mullvad's own rpm repository, added in the
-# kickstart's %post the way Mullvad documents it (repo file, signature checked by dnf),
-# and is left exactly as shipped: its fingerprint is the same for everybody who uses it.
+# build: Fedora minimal + cage + Mullvad Browser + Brave from browsevm.ks, network
+# "browse" (section browsevm). Both browsers come from their makers' own rpm
+# repositories, added in the kickstart's %post the way each documents it (repo file,
+# signature checked by dnf). Mullvad Browser is left as shipped (one look for everybody
+# who uses it) except its security level; Brave gets managed policies.
 # The base image is never booted for browsing: the VM (step 3) runs on a throwaway
 # overlay.
 # --iso: installer (kernel, initrd, stage2) from a local Fedora Everything netinst ISO
@@ -22,20 +26,28 @@
 # A download speed probe runs first: under BROWSEVM_MIN_KBPS (default 200 KB/s) the build
 # stops (it would take many hours); BROWSEVM_MIN_KBPS=0 builds anyway.
 #
+# update: build with --force from the newest kept netinst ISO, under a lock (the VM
+# cannot start meanwhile); good = the install finished with both browsers: the old base
+# deleted, versions old -> new printed, $INFO written. Not good: the old base back.
+# --if-older N: nothing to do while the base is younger than N days. VM running: nothing
+# to do (next run). Run daily by browsevm-update.timer with --if-older 7.
+#
 # install: defines the domain "browsevm" from domain.xml (disk = an overlay on the base
 # image that browsevm-ctl makes at start and deletes at stop, the base read-only for the
 # VM; SPICE on a unix socket, no clipboard / USB / shares / agent), installs
-# browsevm-ctl (root, run by browsevm.service only), browsevm.service (never enabled), a
-# polkit rule (DAILY_USER may start / stop that unit, nothing else), /usr/local/bin/browsevm
-# (start + remote-viewer + stop when the window closes) and its desktop entry. The daily
-# user gets no libvirt access. Run again after a change here; the VM must be off.
+# browsevm-ctl (root, run by browsevm@<browser>.service only), browsevm@.service (never
+# enabled), a polkit rule (DAILY_USER may start / stop browsevm@mullvad / @brave, nothing
+# else), /usr/local/bin/browsevm (start + remote-viewer + stop when the window closes)
+# and its two desktop entries, a root-owned copy of this script + the kickstart in
+# $LIB and browsevm-update.timer (enabled). The daily user gets no libvirt access. Run
+# again after a change here; the VM must be off.
 #
 # report: nobody can log in to the VM (no shell, no ssh, no agent). The image has a small
 # unit that writes the kiosk's state (cage, the browser, its security level, the script
 # test page, SELinux, consoles, network, errors) to the first serial port; the browsing
 # domain has none, so nothing is ever sent.
 # report defines the domain once with a serial port logged by virtlogd, starts it through
-# browsevm.service, prints what the guest wrote, stops it and puts the domain back.
+# browsevm@<browser>.service, prints what the guest wrote, stops it and puts the domain back.
 # BROWSEVM_REPORT_SHOT=<file> also saves a screenshot before the stop.
 # BROWSEVM_REPORT_PROBE="<ip>:<port> ..." also hands the guest probe targets (SMBIOS OEM
 # string of this one start): it tries TCP to each (none may open), then 30 rounds of
@@ -55,6 +67,13 @@ ETC=/etc/browsevm                # network.xml (section browsevm), domain.xml, v
 LOGDIR=/var/log/libvirt/qemu     # virtlogd writes here (virt_log_t); QEMU never opens it
 MIN_KBPS="${BROWSEVM_MIN_KBPS:-200}"
 MULLVAD_REPO=https://repository.mullvad.net/rpm/stable/mullvad.repo   # same URL in browsevm.ks
+BRAVE_REPO=https://brave-browser-rpm-release.s3.brave.com/brave-browser.repo   # same URL in browsevm.ks
+BUILD_LOCK=/run/browsevm-build.lock   # held by build; browsevm-ctl / the launcher wait for it
+LIB=/usr/local/lib/browsevm           # root-owned copy run by browsevm-update.service
+INFO=/var/lib/browsevm/base.info      # date + browser versions of the last good build
+IMGDIR=/var/lib/libvirt/images        # base image, kept netinst ISO
+BROWSERS=(mullvad brave)
+UNITS=(browsevm@mullvad.service browsevm@brave.service)
 V=(virsh -q -c qemu:///system)
 TMPD=""
 trap '[[ -n $TMPD ]] && rm -rf "$TMPD"' EXIT
@@ -91,8 +110,10 @@ cmd_build() {
     die "a $BUILD domain exists (old run?): sudo virsh destroy $BUILD; sudo virsh undefine $BUILD"
   fi
   if [[ -e $BASE ]] && ((!force)); then die "$BASE exists (--force moves it to $BASE.old)"; fi
-  if systemctl is-active --quiet browsevm.service; then
-    die "the VM is running (browsevm.service active): stop it first: sudo systemctl stop browsevm.service"
+  exec 8>> "$BUILD_LOCK" || die "cannot open $BUILD_LOCK"
+  flock -n 8 || die "another build / update runs"
+  if vm_active; then
+    die "the VM is running: close its window (or: sudo systemctl stop ${UNITS[*]})"
   fi
   c=$(domains_using_base)
   if [[ -n $c ]]; then
@@ -130,6 +151,8 @@ cmd_build() {
   # the browser's repository must answer before 10 minutes of install are spent
   curl -fsSL --max-time 30 -o /dev/null "$MULLVAD_REPO" || die "Mullvad's rpm repository not reachable: $MULLVAD_REPO"
   ok "Mullvad rpm repository reachable"
+  curl -fsSL --max-time 30 -o /dev/null "$BRAVE_REPO" || die "Brave's rpm repository not reachable: $BRAVE_REPO"
+  ok "Brave rpm repository reachable"
 
   # kickstart: only the release is filled in (injected into the installer's initrd)
   sed "s|@FEDORA@|$FEDORA|g" "$HERE/browsevm.ks" > "$tmp/browsevm.ks"
@@ -145,6 +168,7 @@ cmd_build() {
     "${V[@]}" net-start "$NET" >/dev/null && started_net=1 && ok "network $NET started for the install"
   fi
   log="$LOGDIR/$BUILD-$(date +%Y%m%d-%H%M%S).serial.log"
+  printf '%s\n' "$log" > /run/browsevm-last-build
   location=$url
   extra="inst.ks=file:/browsevm.ks inst.text console=ttyS0"
   if [[ -n $iso ]]; then
@@ -208,6 +232,85 @@ cmd_build() {
   fi
 }
 
+vm_active() {
+  local u
+  for u in "${UNITS[@]}"; do systemctl is-active --quiet "$u" && return 0; done
+  [[ $("${V[@]}" domstate "$DOM" 2>/dev/null) == running ]]
+}
+
+# good build = the install finished and both browsers are in the image
+build_good() {
+  local log=$1
+  [[ -f $log ]] && grep -a 'BROWSEVM: post done' "$log" >/dev/null &&
+    grep -a 'BROWSEVM: browser mullvad-browser-' "$log" >/dev/null &&
+    grep -a 'BROWSEVM: browser brave-browser-' "$log" >/dev/null
+}
+
+cmd_update() {
+  local iso="" older="" age now built log old_info rc
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --iso)      iso=${2:-}; shift ;;
+      --if-older) older=${2:-}; shift ;;
+      *)          die "unknown option: $1" ;;
+    esac
+    shift
+  done
+  [[ $EUID -eq 0 ]] || die "run with sudo"
+  [[ -z $older || $older =~ ^[0-9]+$ ]] || die "--if-older: a number of days"
+  if [[ -n $older && -f $BASE ]]; then
+    built=$(awk '$1 == "built" { print $2; exit }' "$INFO" 2>/dev/null || true)
+    [[ $built =~ ^[0-9]+$ ]] || built=$(stat -c %Y "$BASE")
+    now=$(date +%s)
+    age=$(( (now - built) / 86400 ))
+    if (( age < older )); then
+      ok "base image is $age days old (rebuilt at $older): nothing to do"; return 0
+    fi
+    ok "base image is $age days old: rebuild"
+  fi
+  if vm_active; then
+    warn "the VM is in use: no rebuild now (next run)"; return 0
+  fi
+  if [[ -z $iso ]]; then
+    iso=$(ls -t "$IMGDIR"/Fedora-Everything-netinst-x86_64-"$FEDORA"-*.iso 2>/dev/null | head -n 1 || true)
+  fi
+  [[ -n $iso ]] && ok "installer from the kept ISO $iso" || warn "no kept netinst ISO: installer from the network"
+  old_info=$(cat "$INFO" 2>/dev/null || true)
+  rm -f /run/browsevm-last-build
+  # a .old left by an older failed run is no fallback (the build moves the base there)
+  [[ -f $BASE ]] && rm -f "$BASE.old"
+
+  # the build in a subshell: its die ends the subshell, not this function
+  if [[ -n $iso ]]; then
+    if ( cmd_build --force --iso "$iso" ); then rc=0; else rc=$?; fi
+  else
+    if ( cmd_build --force ); then rc=0; else rc=$?; fi
+  fi
+  log=$(cat /run/browsevm-last-build 2>/dev/null || true)
+  if ((rc == 0)) && build_good "$log"; then
+    rm -f "$BASE.old"
+    install -d -m 0755 "${INFO%/*}"
+    {
+      echo "built $(date +%s) $(date -Is)"
+      grep -a 'BROWSEVM: browser [a-z-]*-[0-9]' "$log" | tr -d '\r' | sed 's/^.*BROWSEVM: browser /browser /'
+      grep -a 'BROWSEVM: release ' "$log" | tr -d '\r' | sed 's/^.*BROWSEVM: release /release /'
+    } > "$INFO"
+    ok "new base image: old one deleted"
+    echo "-- before:"
+    if [[ -n $old_info ]]; then printf '%s\n' "$old_info" | grep -v '^built '; else echo "(no $INFO yet)"; fi
+    echo "-- now:"
+    grep -v '^built ' "$INFO"
+    return 0
+  fi
+  warn "build not good (rc $rc): the old base stays"
+  if [[ -f $BASE.old ]]; then
+    mv -f "$BASE.old" "$BASE" && chown root:root "$BASE" && chmod 0600 "$BASE"
+    restorecon -F "$BASE" 2>/dev/null || true
+    ok "old base image back"
+  fi
+  die "update failed (serial log: ${log:-none})"
+}
+
 # every domain (running or not) whose XML names the base image: a running browsevm (the
 # base is its overlay's backing file) or an old definition with the base as its disk
 domains_using_base() {
@@ -245,14 +348,15 @@ cmd_install() {
   for f in virsh systemctl qemu-img mountpoint; do
     command -v "$f" >/dev/null || die "$f missing"
   done
-  for f in domain.xml browsevm-ctl.sh browsevm-view.sh browsevm.service 60-browsevm.rules browsevm.desktop; do
+  for f in domain.xml browsevm-ctl.sh browsevm-view.sh browsevm@.service 60-browsevm.rules browsevm.desktop \
+           browsevm-brave.desktop browsevm-update.service browsevm-update.timer browsevm.ks browsevm.sh; do
     [[ -f $HERE/$f ]] || die "$HERE/$f missing: run from the repo"
   done
   "${V[@]}" net-info "$NET" >/dev/null 2>&1 || die "network $NET missing: sudo ./harden-workstation.sh browsevm"
   [[ -f $BASE ]] || die "$BASE missing: sudo browsevm/browsevm.sh build"
   st=$("${V[@]}" domstate "$DOM" 2>/dev/null || echo gone)
   [[ $st == gone || $st == "shut off" ]] ||
-    die "domain $DOM is '$st': sudo systemctl stop browsevm.service, then run again"
+    die "domain $DOM is '$st': close its window (sudo systemctl stop ${UNITS[*]}), then run again"
 
   tmp=$(mktemp -d)
   TMPD=$tmp
@@ -273,20 +377,37 @@ cmd_install() {
   put 0644 "$tmp/view-user" "$ETC/view-user"
   put 0755 "$HERE/browsevm-ctl.sh" /usr/local/sbin/browsevm-ctl
   put 0755 "$HERE/browsevm-view.sh" /usr/local/bin/browsevm
-  put 0644 "$HERE/browsevm.service" /etc/systemd/system/browsevm.service
-  systemctl daemon-reload
+  put 0644 "$HERE/browsevm@.service" /etc/systemd/system/browsevm@.service
+  if [[ -f /etc/systemd/system/browsevm.service ]]; then
+    systemctl stop browsevm.service >/dev/null 2>&1 || true
+    rm -f /etc/systemd/system/browsevm.service && ok "old browsevm.service removed (now browsevm@<browser>)"
+  fi
   sed "s|@USER@|$user|" "$HERE/60-browsevm.rules" > "$tmp/60-browsevm.rules"
   put 0644 "$tmp/60-browsevm.rules" /etc/polkit-1/rules.d/60-browsevm.rules
   put 0644 "$HERE/browsevm.desktop" /usr/local/share/applications/browsevm.desktop
+  put 0644 "$HERE/browsevm-brave.desktop" /usr/local/share/applications/browsevm-brave.desktop
+
+  # the daily update runs a root-owned copy, never the repo in a home
+  install -d -m 0755 "$LIB"
+  put 0755 "$HERE/browsevm.sh" "$LIB/browsevm.sh"
+  put 0644 "$HERE/browsevm.ks" "$LIB/browsevm.ks"
+  put 0644 "$HERE/browsevm-update.service" /etc/systemd/system/browsevm-update.service
+  put 0644 "$HERE/browsevm-update.timer" /etc/systemd/system/browsevm-update.timer
+  systemctl daemon-reload
+  if systemctl enable --now browsevm-update.timer >/dev/null 2>&1; then
+    ok "browsevm-update.timer enabled: daily check, rebuild when the base is 7 days old"
+  else
+    warn "could not enable browsevm-update.timer"
+  fi
 
   command -v remote-viewer >/dev/null ||
     warn "remote-viewer missing: sudo rpm-ostree install virt-viewer, reboot"
-  ok "$user: open 'browsevm' from the app grid (or run: browsevm); closing the window stops the VM"
+  ok "$user: open 'browsevm Mullvad' or 'browsevm Brave' from the app grid (or run: browsevm [mullvad|brave]); closing the window stops the VM"
 }
 
 # the normal definition back, whatever happened in cmd_report
 report_restore() {
-  systemctl stop browsevm.service >/dev/null 2>&1 || true
+  systemctl stop "${UNITS[@]}" >/dev/null 2>&1 || true
   "${V[@]}" undefine "$DOM" >/dev/null 2>&1 || true
   "${V[@]}" define "$ETC/domain.xml" >/dev/null ||
     warn "could not define $ETC/domain.xml again: sudo DAILY_USER=<daily user> $0 install"
@@ -295,8 +416,10 @@ report_restore() {
 cmd_report() {
   local st tmp log="$LOGDIR/$DOM-report.serial.log" shot=${BROWSEVM_REPORT_SHOT:-}
   local probe=${BROWSEVM_REPORT_PROBE:-}
-  local secs=${BROWSEVM_REPORT_SECS:-240} t0
-  [[ $# -eq 0 ]] || die "report takes no option"
+  local secs=${BROWSEVM_REPORT_SECS:-240} t0 b=${1:-mullvad} unit
+  [[ $# -le 1 ]] || die "report takes one browser at most"
+  [[ $b == mullvad || $b == brave ]] || die "report [mullvad|brave]"
+  unit=browsevm@$b.service
   [[ $EUID -eq 0 ]] || die "run with sudo"
   [[ $secs =~ ^[0-9]+$ ]] || die "BROWSEVM_REPORT_SECS must be a number"
   if [[ -n $probe ]]; then
@@ -307,7 +430,7 @@ cmd_report() {
   [[ -f $ETC/domain.xml ]] || die "$ETC/domain.xml missing: install first"
   st=$("${V[@]}" domstate "$DOM" 2>/dev/null || echo gone)
   [[ $st == "shut off" ]] || die "domain $DOM is '$st': stop it first (or install)"
-  if systemctl is-active --quiet browsevm.service; then die "browsevm.service is active: stop it first"; fi
+  if vm_active; then die "the VM is in use: close its window first"; fi
 
   tmp=$(mktemp -d)
   TMPD=$tmp
@@ -316,9 +439,8 @@ cmd_report() {
   grep "<serial type='pty'>" "$tmp/report.xml" >/dev/null || die "could not add the serial port"
   if [[ -n $probe ]]; then
     # the guest reads it from /sys/firmware/dmi/entries/11-0/raw (SMBIOS type 11)
-    sed -i -e "s|<os>|<os>\n    <smbios mode='sysinfo'/>|" \
-           -e "s|<devices>|<sysinfo type='smbios'>\n    <oemStrings>\n      <entry>browsevm-probe $probe</entry>\n    </oemStrings>\n  </sysinfo>\n  <devices>|" \
-           "$tmp/report.xml"
+    # (the domain's sysinfo already holds the browser entry: one more entry next to it)
+    sed -i "s|</oemStrings>|  <entry>browsevm-probe $probe</entry>\n    </oemStrings>|" "$tmp/report.xml"
     grep "<entry>browsevm-probe $probe</entry>" "$tmp/report.xml" >/dev/null &&
       grep "<smbios mode='sysinfo'/>" "$tmp/report.xml" >/dev/null || die "could not add the probe targets"
     ok "probe targets for the guest: $probe"
@@ -329,8 +451,8 @@ cmd_report() {
   trap 'exit 130' INT TERM
   "${V[@]}" undefine "$DOM" >/dev/null || die "virsh undefine $DOM failed"
   "${V[@]}" define --validate "$tmp/report.xml" >/dev/null || die "virsh define (with serial) failed"
-  systemctl start browsevm.service || die "browsevm.service did not start (journalctl -u browsevm.service)"
-  ok "started with a serial port - the guest writes its report 1-3 min after boot"
+  systemctl start "$unit" || die "$unit did not start (journalctl -u $unit)"
+  ok "started with $b and a serial port - the guest writes its report 1-3 min after boot"
   t0=$SECONDS
   while (( SECONDS - t0 < secs )); do
     if grep -a 'BROWSEVM-REPORT end' "$log" >/dev/null 2>&1; then break; fi
@@ -357,7 +479,8 @@ cmd_report() {
 
 case "${1:-}" in
   build)   shift; cmd_build "$@" ;;
+  update)  shift; cmd_update "$@" ;;
   install) shift; cmd_install "$@" ;;
   report)  shift; cmd_report "$@" ;;
-  *)       sed -n '3,9p' "$0"; exit 2 ;;
+  *)       sed -n '3,12p' "$0"; exit 2 ;;
 esac

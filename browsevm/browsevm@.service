@@ -1,0 +1,18 @@
+# browsevm@.service - the throwaway browsing VM with one browser (docs/browsevm.md)
+# Instances: browsevm@mullvad.service (Mullvad Browser), browsevm@brave.service (Brave).
+# One VM: a second instance is refused by browsevm-ctl while the first one runs.
+# Installed by "browsevm.sh install" to /etc/systemd/system. Never enabled: started on
+# demand by the daily user (polkit rule 60-browsevm.rules) through /usr/local/bin/browsevm.
+# That user gets these units only, no libvirt access.
+
+[Unit]
+Description=browsevm: throwaway browsing VM (%i)
+After=virtqemud.socket virtnetworkd.socket libvirtd.socket
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/browsevm-ctl start %i
+ExecStop=/usr/local/sbin/browsevm-ctl stop
+TimeoutStartSec=60
+TimeoutStopSec=60
