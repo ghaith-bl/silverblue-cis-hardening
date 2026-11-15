@@ -273,8 +273,9 @@ in a terminal). Window closed = VM stopped.
 sudo browsevm/browsevm.sh report            # VM off; Mullvad Browser; about 3 min
 sudo browsevm/browsevm.sh report brave      # the same with Brave
 ```
-- nobody can log in to the VM. The image's `browsevm-report.service` writes the kiosk's
-  state to the first serial port once the browser's window is up (1-3 min after boot):
+- nobody can log in to the VM. The image's `browsevm-report.service` (after
+  `browsevm-select`) writes the kiosk's state to the first serial port once the browser's
+  window is up (1-3 min after boot):
   `BROWSER <name>`, cage unit + its journal, SELinux label and no_new_privs of cage / the
   browser, X11 or Wayland, sessions, consoles, AVC denials, the browser's own section,
   network, sound cards, errors, versions

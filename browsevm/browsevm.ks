@@ -347,14 +347,16 @@ cat > /usr/local/sbin/browsevm-report <<'REPORT'
 ( : > /dev/ttyS0 ) 2>/dev/null || exit 0
 P=/home/web/.browsevm/profile
 S=/home/web/.browsevm/state
-B=$(cat /run/browsevm-browser 2>/dev/null)
 BP='mullvad-?browser|brave.com/brave/brave'
-# Mullvad Browser's first start is headless (up to about a minute): wait for the window
+# Mullvad Browser's first start is headless (up to about a minute): wait for the window.
+# The choice is read again every round (written by browsevm-select before cage starts).
 for _ in $(seq 30); do
+  B=$(cat /run/browsevm-browser 2>/dev/null)
   if pgrep -u web -f "$BP" >/dev/null && { [ "$B" = brave ] || [ -e "$S/warm" ]; }; then break; fi
   sleep 5
 done
 sleep 20
+B=$(cat /run/browsevm-browser 2>/dev/null)
 {
   echo "BROWSEVM-REPORT begin"
   echo "BROWSER ${B:-none} (chosen by the host)"
@@ -447,6 +449,9 @@ chmod 0755 /usr/local/sbin/browsevm-report
 cat > /etc/systemd/system/browsevm-report.service <<'UNIT'
 [Unit]
 Description=browsevm: kiosk state to the serial port (only a domain that has one)
+# the browser of this start is known only after browsevm-select (multi-user.target comes
+# before graphical.target: without this the report read an empty choice)
+After=browsevm-select.service
 
 [Service]
 Type=simple
