@@ -4,7 +4,7 @@
 # usage: sudo tools/check-accounts.sh <admin user> <daily user>
 #
 # - changes nothing: reads group/passwd data, PAM and AccountsService files,
-#   /proc credentials, unit states, sudo.log
+#   /proc credentials, unit states, sudo.log, owners / modes in /usr/local/{bin,sbin}
 # - one line per check: PASS / FAIL / INFO
 # - keeps a copy readable by the daily user in /tmp/check-accounts.XXXXXX
 #   (no secrets: group lists, modes, unit states; tty consoles can't copy/paste)
@@ -150,6 +150,15 @@ main() {
   for u in sectop.service sectop-net.service "sectop-user@$DAILY.service" sectop-whois.socket; do
     unit_file "$u" || continue
     expect "unit ${u%.*}" "$(systemctl is-active "$u")" active
+  done
+
+  # --- programs on the admin's PATH: a file the daily user (or anyone but root) can
+  # change there runs with the admin's rights the next time the admin types its name
+  for d in /usr/local/bin /usr/local/sbin; do
+    [[ -d $d ]] || continue
+    line=$(find -L "$d" -mindepth 1 -maxdepth 1 \( ! -user root -o -perm /022 \) -printf '%f(%u) ' 2>/dev/null)
+    if [[ -z $line ]]; then out PASS "path ${d#/usr/}" "root-owned, not group/world writable"
+    else out FAIL "path ${d#/usr/}" "${line% }: owner must be root, no group/world write"; fi
   done
 
   # --- evidence and policy notes

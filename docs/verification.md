@@ -38,6 +38,7 @@ Tests run after hardening + reboot. All passed.
 | home admin / home null | `700 <admin>` / `700 null` |
 | sysusers admin / daily | `m <admin> sectop` / no line |
 | mullvad lockdown | on |
+| path local/bin, local/sbin | root-owned, not group/world writable (a file the daily user owns there runs with the admin's rights) |
 | unit sectop, sectop-net, sectop-user@null, sectop-whois | active |
 | summary | `0 FAIL` |
 
