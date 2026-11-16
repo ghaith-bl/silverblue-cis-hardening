@@ -40,7 +40,7 @@ Input for an OpenSCAP tailoring file.
 | Rule | Decision | Reason |
 |------|----------|--------|
 | `sysctl_kernel_kptr_restrict` | set `2` | stricter than the CIS value `1` (hidden from root too) |
-| `sysctl_kernel_yama_ptrace_scope` | set `2` | admin-only attach, idea from secureblue (no ptrace by default). CIS RHEL 9 v3.0.0 accepts `1`, `2` or `3` and recommends `2`; RHEL 9 STIG (RHEL-09-213080) wants exactly `1`: finding there. Scanner fails if its profile value is `1`. Cost: `gdb` / `strace` need sudo; anti-cheat games need ptrace (GTA Online does not run on Linux anyway). Tested 2026-10-30 at runtime: Steam game, browsers, VMs OK. Undo: set `1`, `sudo sysctl --system` (no reboot) |
+| `sysctl_kernel_yama_ptrace_scope` | set `2` (decision `PTRACE_SCOPE`) | admin-only attach, idea from secureblue (no ptrace by default). CIS RHEL 9 v3.0.0 accepts `1`, `2` or `3` and recommends `2`; RHEL 9 STIG (RHEL-09-213080) wants exactly `1`: finding there. Scanner fails if its profile value is `1`. Cost: `gdb` / `strace` need sudo; anti-cheat games need ptrace (GTA Online does not run on Linux anyway). Tested 2026-10-30 at runtime: Steam game, browsers, VMs OK. Undo: set `1`, `sudo sysctl --system` (no reboot) |
 | `auditd_data_disk_full_action`, `auditd_data_retention_admin_space_left_action` | `SUSPEND` | CIS `HALT`/`SINGLE` would stop a laptop when the disk fills |
 | `auditd_data_retention_space_left_action` | `SYSLOG` | no local MTA for `EMAIL` |
 | `auditd_data_retention_max_log_file_action` | keep `ROTATE` | CIS `KEEP_LOGS` has no limit; `/var` also holds `/var/home` |
@@ -182,8 +182,8 @@ Input for an OpenSCAP tailoring file.
   on that path anyway). Test idea: `e`, break the `ostree=` path, unlock -> must halt.
 - Source of the kargs ideas: secureblue default kargs (compared 2026-10-30), minus what
   the Fedora kernel config already does. Not taken: `ia32_emulation=0` (Steam),
-  `nosmt` (half the cores), `vsyscall=none` (kernel already xonly), `module.sig_enforce`
-  (lockdown integrity).
+  `nosmt` (half the cores), `vsyscall=none` (kernel already xonly). `module.sig_enforce`
+  first left out (lockdown integrity does it), taken 2026-11-16: see below.
 - `init_on_free=1 iommu.strict=1` (kargs, 2026-11-07, after a trial from 2026-11-03):
   freed pages zeroed at once; IOTLB flushed on every DMA unmap (no lazy window).
   Kernel docs: init_on_free costs 3-5 % typical, up to 8 %. Measured with
@@ -191,3 +191,43 @@ Input for an OpenSCAP tailoring file.
   0.78 / 0.68 / 0.66 s, small files 0.17 / 0.18 / 0.17 s, podman run 0.28 / 0.36 /
   0.35 s, O_DIRECT 2 GiB read noisy (1.0 - 3.3 s), IOMMU faults 0, no felt slowdown in
   4 days (desktop, Steam on the iGPU). Undo: `rpm-ostree kargs --delete=...`, reboot.
+
+## Kernel attack surface (not CIS: KSPP, 2026-11-16)
+
+Measured first: kernel-hardening-checker v0.6.17.1 (a13xp0p0v, KSPP / CLIP OS / grsecurity
+recommendations) on the host's kconfig, /proc/cmdline and `sysctl -a`: OK 208, FAIL 144.
+Most FAIL rows are Fedora build options (signed Fedora kernel, not changed here). Taken:
+
+- sysctl section: `kernel.io_uring_disabled = 2` (RHEL >= 9.3 ships it; Google: 60 % of the
+  kernel exploits in its 2022 bounty used io_uring, off on ChromeOS and its servers; no
+  process held an io_uring fd on 2026-11-15), `dev.tty.ldisc_autoload = 0`,
+  `fs.protected_fifos = 2`, `fs.protected_regular = 2`, `kernel.sysrq = 0`,
+  `kernel.warn_limit = 100`, `kernel.oops_limit = 100` (kept journal 2026-08 .. 11: no WARN /
+  Oops line at all), `vm.mmap_rnd_bits = 32`, `vm.mmap_rnd_compat_bits = 16` (kernel
+  maximum; 32-bit Steam client and games: test after the reboot).
+- Audit rule `io-uring` (b64 + b32 `io_uring_setup`): every hit is a refused try. Rules: 75.
+- kargs: `hash_pointers=always` (hashed %p in every log, also for root),
+  `proc_mem.force_override=never` (no write to read-only memory of a process through
+  /proc/<pid>/mem; debuggers may break), `module.sig_enforce=1` (signed modules only even
+  if Secure Boot is switched off in the firmware and lockdown with it), `intel_iommu=on`
+  (on now only through the firmware's DMA opt-in flag; `CONFIG_INTEL_IOMMU_DEFAULT_ON` is
+  not set), `debugfs=off` (`CONFIG_DEBUG_FS_ALLOW_ALL=y`; lockdown already limits it),
+  `bdev_allow_write_mounted=0` (no direct writes to a block device with a mounted
+  filesystem). Undo: `rpm-ostree kargs --delete=...`, reboot.
+
+Not taken:
+
+| Checker row | Why |
+|-------------|-----|
+| `spectre_v2`, `mds`, `l1tf` ... `vmscape` (16 cmdline rows "is off, not found") | false positive: kconfig has `CONFIG_CPU_MITIGATIONS=y` and every `CONFIG_MITIGATION_*=y`; nothing turns them off on the command line |
+| `user.max_user_namespaces = 0` | Flatpak (bwrap), rootless Podman / kind, Brave's sandbox, glycin image loaders and systemd services with `PrivateUsers=` use them (12 processes, 5 namespaces on 2026-11-15) |
+| `kernel.modules_disabled = 1` | flash drives and libvirt load modules after boot |
+| `mitigations=auto,nosmt`, `nosmt` | half the threads of the P-cores |
+| `ia32_emulation=0` | Steam client and many games are 32-bit |
+| `vsyscall=none` | kernel default `xonly` already; old binaries / games, later |
+| `pti=on` | auto mode turns it on where the CPU needs it; check `/sys/devices/system/cpu/vulnerabilities/meltdown` |
+| `lockdown=confidentiality` | now `integrity` (Secure Boot); confidentiality also blocks kernel memory reads by tracing / eBPF tools: decide with sectop's monitoring plans |
+| `cfi=kcfi` | kernel built without `CONFIG_CFI` (IBT is on) |
+| `kernel.perf_event_paranoid = 3` | needs a distro patch the Fedora kernel does not carry: no effect |
+| `kernel.yama.ptrace_scope = 3` | decision `PTRACE_SCOPE` (2 or 3) |
+| `efi=disable_early_pci_dma` | some machines do not boot with it: own trial later, alone |

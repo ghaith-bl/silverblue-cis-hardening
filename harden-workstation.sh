@@ -43,8 +43,11 @@ MAC_MODE="random"            # "random" = new MAC on every connect (Wi-Fi + cabl
                              # "stable-ssid" = same random MAC per Wi-Fi network (Fedora default)
 GENERIC_HOSTNAME="localhost" # hostname every network may see; "" = keep the current one
 KERNEL_ARGS=(initcall_blacklist=af_alg_init page_alloc.shuffle=1 rd.shell=0 rd.emergency=halt
-             init_on_free=1 iommu.strict=1)
+             init_on_free=1 iommu.strict=1 hash_pointers=always proc_mem.force_override=never
+             module.sig_enforce=1 intel_iommu=on debugfs=off bdev_allow_write_mounted=0)
                              # kargs section; () = add none
+PTRACE_SCOPE=2               # sysctl section: 2 = only root may trace (gdb / strace need sudo);
+                             # 3 = nobody, root included, one-way until reboot
 MULLVAD_SOCKET_GROUP="mullvad"  # mullvad section: only this group may use the Mullvad CLI / GUI
                              # "" = any local user (Mullvad's default)
 MULLVAD_VM_BRIDGES=(virbr0 virbr-browse)  # kvmlan section: libvirt bridges outside Mullvad's LAN
@@ -158,14 +161,15 @@ add_karg() {
 # Sections
 # -----------------------------------------------------------------------------
 sec_sysctl() {
-  write_file /etc/sysctl.d/90-hardening.conf 0644 <<'EOF'
+  [[ $PTRACE_SCOPE =~ ^[123]$ ]] || die "PTRACE_SCOPE must be 1, 2 or 3"
+  write_file /etc/sysctl.d/90-hardening.conf 0644 <<EOF
 # ---- Kernel ----
 kernel.dmesg_restrict = 1
 kernel.kptr_restrict = 2
-# 2 = admin-only attach: only CAP_SYS_PTRACE may trace (gdb / strace need sudo).
-# CIS RHEL 9 v3.0.0 accepts 1, 2 or 3 and recommends 2; RHEL 9 STIG wants 1.
-# 3 cannot be lowered until reboot.
-kernel.yama.ptrace_scope = 2
+# PTRACE_SCOPE: 2 = admin-only attach (only CAP_SYS_PTRACE may trace: gdb / strace need
+# sudo); 3 = no attach for anyone, root included. CIS RHEL 9 v3.0.0 accepts 1, 2 or 3
+# and recommends 2; RHEL 9 STIG wants 1; KSPP recommends 3. 3 cannot be lowered until reboot.
+kernel.yama.ptrace_scope = ${PTRACE_SCOPE}
 kernel.randomize_va_space = 2
 kernel.kexec_load_disabled = 1
 kernel.unprivileged_bpf_disabled = 1
@@ -173,6 +177,24 @@ net.core.bpf_jit_harden = 2
 fs.suid_dumpable = 0
 fs.protected_hardlinks = 1
 fs.protected_symlinks = 1
+
+# ---- Kernel attack surface (not CIS: KSPP recommended settings, 2026-11-16) ----
+# io_uring off for every process (RHEL >= 9.3 default; Google: most kernel exploits of
+# its 2022 bounty). Audit rule io-uring logs every refused try (audit-rules section).
+kernel.io_uring_disabled = 2
+# no automatic load of tty line discipline modules by unprivileged programs
+dev.tty.ldisc_autoload = 0
+# no O_CREAT open of another user's FIFO / file in world- or group-writable sticky dirs
+fs.protected_fifos = 2
+fs.protected_regular = 2
+# Magic SysRq keys off
+kernel.sysrq = 0
+# panic after 100 WARN / Oops in one boot: stops exploits that retry until they win
+kernel.warn_limit = 100
+kernel.oops_limit = 100
+# most random bits for mmap addresses (kernel maximum: 64-bit 32, 32-bit programs 16)
+vm.mmap_rnd_bits = 32
+vm.mmap_rnd_compat_bits = 16
 
 # ---- IPv4 ----
 # net.ipv4.ip_forward is intentionally NOT set to 0: libvirt NAT (KVM) needs it.
@@ -746,6 +768,15 @@ EOF
   elif [[ -e $d/99-finalize.rules ]]; then
     backup "$d/99-finalize.rules"; rm -f "$d/99-finalize.rules"; log "removed 99-finalize.rules (unlocked from the next boot)"
   fi
+
+  # Not CIS (2026-11-16): io_uring is off for everyone (sysctl section), so every
+  # io_uring_setup call fails with EPERM: a program that wants it, or a probe.
+  write_file "$d/70-io-uring.rules" 0640 <<'EOF'
+## io_uring_setup, not CIS. kernel.io_uring_disabled = 2 (sysctl section): every call
+## fails (EPERM), so every event is a refused try.
+-a always,exit -F arch=b64 -S io_uring_setup -k io-uring
+-a always,exit -F arch=b32 -S io_uring_setup -k io-uring
+EOF
 
   # Not CIS (my design, 2026-11-01): who opens an AF_ALG socket (family 38). Measured
   # before the kargs section blocked it; after it, every try fails (EAFNOSUPPORT).

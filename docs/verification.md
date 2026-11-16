@@ -64,7 +64,9 @@ Tests run after hardening + reboot. All passed.
 | identity watch | `sudo touch /etc/passwd; sudo ausearch -k identity -ts recent -i` | event with `auid=<user>` |
 | hostname syscall | `sudo hostname "$(hostname)"; sudo ausearch -k system-locale -ts recent -i` | `syscall=sethostname` |
 | SELinux policy watch | `sudo touch /etc/selinux/config; sudo ausearch -k MAC-policy -ts recent -i` | event |
-| sysctl | `sysctl kernel.yama.ptrace_scope kernel.kexec_load_disabled fs.suid_dumpable` | `2`, `1`, `0` |
+| sysctl | `sysctl kernel.yama.ptrace_scope kernel.kexec_load_disabled fs.suid_dumpable` | `PTRACE_SCOPE`, `1`, `0` |
+| sysctl: attack surface | `sysctl kernel.io_uring_disabled dev.tty.ldisc_autoload fs.protected_fifos fs.protected_regular kernel.sysrq kernel.warn_limit kernel.oops_limit` | `2`, `0`, `2`, `2`, `0`, `100`, `100` |
+| sysctl: mmap bits | `sudo sysctl vm.mmap_rnd_bits vm.mmap_rnd_compat_bits` (root only, 0600) | `32`, `16` |
 | password quality | `echo 'Password123' \| pwscore` | rejected (< 14 chars) |
 | faillock | `faillock --user "$USER"` | empty table |
 | su blocked | `su -` | `Permission denied` |
@@ -102,6 +104,11 @@ Tests run after hardening + reboot. All passed.
 | AF_ALG socket fails | `python3 -I -c 'import socket; socket.socket(socket.AF_ALG, socket.SOCK_SEQPACKET)'` | `OSError: [Errno 97] Address family not supported by protocol` |
 | hardening kargs | `grep -oE 'page_alloc.shuffle=[^ ]*\|rd.shell=[^ ]*\|rd.emergency=[^ ]*' /proc/cmdline` | `page_alloc.shuffle=1`, `rd.shell=0`, `rd.emergency=halt` |
 | memory / DMA kargs | `grep -oE 'init_on_free=[^ ]*\|iommu.strict=[^ ]*' /proc/cmdline`; `journalctl -k -b -g 'mem auto-init\|TLB invalidation'` | `init_on_free=1`, `iommu.strict=1`; `heap free:on`, `strict mode` |
+| KSPP kargs | `grep -oE 'hash_pointers=[^ ]*\|proc_mem.force_override=[^ ]*\|module.sig_enforce=[^ ]*\|intel_iommu=[^ ]*\|debugfs=[^ ]*\|bdev_allow_write_mounted=[^ ]*' /proc/cmdline` | the six args |
+| IOMMU on | `ls /sys/class/iommu`; `journalctl -k -b -g 'DMAR: IOMMU enabled'` | `dmar0` (or more); the line |
+| debugfs off | `grep -c debugfs /proc/mounts`; `test -d /sys/kernel/debug && echo present \|\| echo absent` | `0`; `absent` (sys-kernel-debug.mount skipped by its condition, not failed) |
+| io_uring refused | `python3 -I -c 'import ctypes; l = ctypes.CDLL(None, use_errno=True); print(l.syscall(425, 1, ctypes.create_string_buffer(120)), ctypes.get_errno())'` | `-1 1` (EPERM) |
+| io_uring tries since boot | `sudo ausearch -k io-uring -ts boot -i \| grep -o 'exe=[^ ]*' \| sort \| uniq -c` | only the test above (python3) |
 | page allocator shuffle | `sudo cat /sys/module/page_alloc/parameters/shuffle` (root only, 0400) | `Y` |
 | GRUB password | `sudo test -f /boot/grub2/user.cfg && echo set`; menu: `e` on an entry | `set`; asks user `root` + password; plain boot asks nothing |
 | AF_ALG tries since boot | `sudo ausearch -k af-alg -sc socket -ts boot -i \| grep -o 'exe=[^ ]*' \| sort \| uniq -c` | only the test above (python3) |

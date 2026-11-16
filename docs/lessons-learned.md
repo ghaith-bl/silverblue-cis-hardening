@@ -129,6 +129,12 @@
 - `ptrace_scope = 2` (since 2026-10-30): `gdb ./prog` / `strace ./prog` need sudo too (`PTRACE_TRACEME`
   needs `CAP_SYS_PTRACE`, kernel Yama docs). Yama checks attach only, so `/proc/<pid>` reads stay as before.
   Can be set back without reboot; only `3` is one-way.
+- `vm.mmap_rnd_bits` / `vm.mmap_rnd_compat_bits` are root-only files (0600), like
+  `net.core.bpf_jit_harden`: a non-root checker (sectop) cannot read them.
+- kernel-hardening-checker (2026-11-15, v0.6.17.1, kernel 7.3): the 16 CPU mitigation
+  cmdline rows say "is off, not found" although kconfig has `CONFIG_CPU_MITIGATIONS=y` and
+  every `CONFIG_MITIGATION_*=y`: read the kconfig rows before trusting a cmdline FAIL.
+  Run it unprivileged on copies made by root (`sysctl -a` needs root for 0600 files).
 
 ## Audio
 

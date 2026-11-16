@@ -48,6 +48,10 @@ sudo systemctl disable --now browsevm-update.timer   # browsevm: no daily base r
 sudo rpm-ostree kargs --delete=initcall_blacklist=af_alg_init   # then reboot
 sudo rpm-ostree kargs --delete=page_alloc.shuffle=1 --delete=rd.shell=0 --delete=rd.emergency=halt
 sudo rpm-ostree kargs --delete=init_on_free=1 --delete=iommu.strict=1
+sudo rpm-ostree kargs --delete=hash_pointers=always --delete=proc_mem.force_override=never \
+  --delete=module.sig_enforce=1 --delete=intel_iommu=on --delete=debugfs=off \
+  --delete=bdev_allow_write_mounted=0                                  # then reboot
+sudo rm /etc/audit/rules.d/70-io-uring.rules && sudo augenrules   # loads at the next boot
 sudo rm /boot/grub2/user.cfg                     # GRUB password off
 sudo rm /etc/audit/rules.d/99-finalize.rules     # audit lock off, then reboot
 sudo rpm-ostree rollback                         # after booting the previous GRUB entry
@@ -56,3 +60,7 @@ sudo ostree admin config-diff                    # every /etc change vs. image d
 
 - Removing a sysctl file does not revert values until reboot.
 - `kernel.kexec_load_disabled` and `kernel.unprivileged_bpf_disabled = 1` are one-way until reboot.
+- `kernel.yama.ptrace_scope = 3` is one-way until reboot: set `PTRACE_SCOPE=2`, run the
+  sysctl section, reboot.
+- Other sysctls (io_uring, sysrq, limits, mmap bits): edit `90-hardening.conf`,
+  `sudo sysctl --system` (no reboot).

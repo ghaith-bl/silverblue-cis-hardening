@@ -91,7 +91,8 @@ sudo ./harden-workstation.sh all
 | `APP_UNITS`            | `(brave-browser)` | desktop ids `appunit` starts as their own service; `()` = none |
 | `ADMIN_USER`           | `""` (env) | `accounts`: text-console admin; `""` = one account |
 | `DAILY_USER`           | `""` (env) | `accounts`: GNOME daily user, no sudo; also the user of the desktop steps. Give it to every run from the admin |
-| `KERNEL_ARGS`          | `(initcall_blacklist=af_alg_init page_alloc.shuffle=1 rd.shell=0 rd.emergency=halt init_on_free=1 iommu.strict=1)` | kernel args of `kargs`; `()` = none |
+| `KERNEL_ARGS`          | `(initcall_blacklist=af_alg_init page_alloc.shuffle=1 rd.shell=0 rd.emergency=halt init_on_free=1 iommu.strict=1 hash_pointers=always proc_mem.force_override=never module.sig_enforce=1 intel_iommu=on debugfs=off bdev_allow_write_mounted=0)` | kernel args of `kargs`; `()` = none |
+| `PTRACE_SCOPE`         | `2`        | `sysctl`: `2` = only root may trace, `3` = nobody (one-way until reboot) |
 
 User names are given on the command line and stay out of git:
 `sudo ADMIN_USER=<admin> DAILY_USER=<daily> ./harden-workstation.sh ...`
@@ -135,7 +136,7 @@ sudo ./harden-workstation.sh kargs    # reboot: LUKS unlock, Wi-Fi, VPN, a VM
 
 | Section       | What it does | Visible effect |
 |---------------|--------------|----------------|
-| `sysctl`      | kernel + network hardening (`/etc/sysctl.d/90-hardening.conf`) | `dmesg`, gdb / strace attach need sudo |
+| `sysctl`      | kernel + network hardening (`/etc/sysctl.d/90-hardening.conf`); not CIS: KSPP attack surface (io_uring off, no tty ldisc autoload, FIFO / file protection 2, SysRq off, WARN / Oops limit 100, mmap bits max) | `dmesg`, gdb / strace attach need sudo; no io_uring |
 | `modules`     | blocks unused filesystems / protocols | no HFS / UDF mounts |
 | `coredump`    | no core dumps | crashes not saved |
 | `journald`    | persistent, compressed journal, no syslog forward (drop-in + main file) | none |
@@ -150,7 +151,7 @@ sudo ./harden-workstation.sh kargs    # reboot: LUKS unlock, Wi-Fi, VPN, a VM
 | `cron`        | root-only cron dirs (modes set again at every boot by tmpfiles), `cron.allow` / `at.allow` | crontab: root + the daily user; `at`: root only |
 | `sshd`        | hardened drop-in `40-cis.conf`, server masked | no incoming SSH |
 | `auditd`      | SYSLOG / SUSPEND instead of HALT, log ring 40 x 32 MiB | up to 1280 MiB in `/var/log/audit` |
-| `audit-rules` | CIS rules, `-c`, setuid list from the host, `-e 2` lock; not CIS: `af-alg` (2 rules). This host: 73 | more log volume; a rule change needs a reboot |
+| `audit-rules` | CIS rules, `-c`, setuid list from the host, `-e 2` lock; not CIS: `af-alg`, `io-uring` (2 rules each). This host: 75 | more log volume; a rule change needs a reboot |
 | `perms`       | audit config 0640, `/boot/grub2` files 0600 (set again at boot by tmpfiles), dotfiles in the homes 0740 or stricter (daily user and admin) | none |
 | `mic`         | WirePlumber rule disables capture nodes | no microphone |
 | `netprivacy`  | not CIS: random MAC, no hostname in DHCP, generic hostname (also a kernel arg), DHCP ids from that MAC, IPv6 temporary addresses, LLMNR + mDNS off, no DNS servers in Wi-Fi / cable profiles | new device on the router each connect; prompt shows `localhost`; no DNS without the tunnel |
@@ -162,7 +163,7 @@ sudo ./harden-workstation.sh kargs    # reboot: LUKS unlock, Wi-Fi, VPN, a VM
 | `appunit`     | not CIS: apps in `APP_UNITS` start as `app-<id>@<pid>.service` (Brave left GNOME Shell's cgroup) | the app in its own unit; after a Brave update run it again |
 | `time`        | chrony: NTS only (Netnod + PTB), `authselectmode require`, `minsources 2`, no pool, no DHCP NTP | no time sync without the tunnel |
 | `autoupdate`  | CIS Controls v8 7.3 / 7.4: `/etc/rpm-ostreed.conf` `AutomaticUpdatePolicy=stage` + `rpm-ostreed-automatic.timer` (OS + layered packages downloaded daily, applied at the next boot); `flatpak-update-system.timer` + global user `flatpak-update-user.timer` (daily) | updates arrive without asking; reboot to apply the OS one (`rpm-ostree status`) |
-| `kargs`       | not CIS: `KERNEL_ARGS` via `rpm-ostree kargs` (next boot): AF_ALG off, random page allocator, no initramfs shell, freed memory zeroed, strict IOMMU | no Adiantum / Serpent / Twofish LUKS, BlueZ mesh, iwd; boot failure halts |
+| `kargs`       | not CIS: `KERNEL_ARGS` via `rpm-ostree kargs` (next boot): AF_ALG off, random page allocator, no initramfs shell, freed memory zeroed, strict IOMMU, hashed pointers, no forced writes through /proc/<pid>/mem, signed modules only, IOMMU on, no debugfs, no writes to mounted block devices | no Adiantum / Serpent / Twofish LUKS, BlueZ mesh, iwd; boot failure halts; no debugfs |
 
 Reasons and costs of every not-CIS choice: [docs/deviations.md](docs/deviations.md).
 
