@@ -93,15 +93,18 @@ shims revoked, ESET / CERT VU#616257). Linux gets dbx updates from LVFS through 
 Red Hat says to apply the newest one this way.
 
 - Host 2026-11-15: dbx `20250902`, LVFS metadata old (`fwupd-refresh.timer` disabled),
-  offered `20260402` (urgency high). Metadata refreshed daily now (autoupdate section).
+  offered `20260402` (urgency high). Metadata refreshed once a day now (autoupdate section).
+- Host 2026-11-16: dbx `20260707`. fwupd reports to LVFS off (`FIRMWARE_REPORTS=no`):
+  a refresh in admin script 24 had uploaded the report of an older update
+  (lessons-learned.md, fwupd).
 - fwupd refuses the update when a boot file on the ESP would be revoked by it (also the
   unused fallback `EFI/BOOT/BOOTX64.EFI`): update or remove that file first
   (`sudo bootupctl update`). LUKS needs no TPM reseal here (password only).
 - Applied by hand from the admin console, never automatic:
 
-      sudo fwupdmgr refresh --force
-      fwupdmgr get-updates                         # UEFI dbx: current -> newest
-      sudo fwupdmgr update <UEFI dbx device id>    # Y to the update, no to the report upload
+      sudo fwupdmgr --no-unreported-check refresh --force
+      fwupdmgr --no-unreported-check get-updates   # UEFI dbx: current -> newest
+      sudo fwupdmgr --no-unreported-check update <UEFI dbx device id>   # Y to the update
       # reboot, then: fwupdmgr get-updates -> no dbx update left
 
 - Back: only through the firmware setup (factory keys), which also brings back the old

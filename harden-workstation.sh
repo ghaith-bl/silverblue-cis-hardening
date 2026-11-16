@@ -63,8 +63,11 @@ AUTO_UPDATE_POLICY="stage"   # autoupdate section: rpm-ostree automatic updates 
                              # download + prepare, applied at the next reboot; "check" = only look;
                              # "none" = off (manual rpm-ostree upgrade)
 FLATPAK_AUTO_UPDATE="yes"    # autoupdate section: Flatpaks (system + every user's) updated daily; "no" = leave
-FIRMWARE_METADATA_REFRESH="yes"  # autoupdate section: fwupd-refresh.timer (LVFS metadata daily, through
-                             # the tunnel); fwupd never installs firmware by itself; "no" = leave
+FIRMWARE_METADATA_REFRESH="yes"  # autoupdate section: fwupd-refresh.timer once a day (LVFS metadata through
+                             # the tunnel; Fedora's own timer: every hour); fwupd never installs
+                             # firmware by itself; "no" = leave
+FIRMWARE_REPORTS="no"        # autoupdate section: "no" = fwupd sends no reports to LVFS (no report
+                             # address in /etc/fwupd/remotes.d, nothing automatic); other = leave
 APP_UNITS=(brave-browser)    # appunit section: desktop ids started as their own service (launcher
                              # forks before GNOME moves it: Chromium family); () = none
 ADMIN_USER="${ADMIN_USER:-}" # accounts section: CLI-only admin (wheel, text console, hidden
@@ -1365,6 +1368,32 @@ sec_appunit() {
 ## boot (ostree-finalize-staged): nothing changes under a running session, the previous
 ## deployment stays in GRUB (rpm-ostree rollback). Flatpaks: a system unit for system-wide
 ## installs, a global user unit for each user's own. Both daily, Persistent.
+# fwupd: no report to LVFS from any remote (no ReportURI = nothing to send to, even after
+# a "yes" by mistake; Automatic*Reports=false). Same edit as admin script 27 (2026-11-16).
+fwupd_reports_off() {
+  local f new changed=0
+  for f in /etc/fwupd/remotes.d/*.conf; do
+    [[ -f $f ]] || continue
+    grep -qE '^#?[[:space:]]*(Security)?ReportURI[[:space:]]*=' "$f" || continue
+    new=$(sed -E -e 's/^((Security)?ReportURI[[:space:]]*=.*)$/#\1/' \
+                 -e 's/^(AutomaticReports|AutomaticSecurityReports)[[:space:]]*=.*$/\1=false/' "$f")
+    grep -qE '^AutomaticReports=' <<<"$new" || new+=$'\nAutomaticReports=false'
+    grep -qE '^AutomaticSecurityReports=' <<<"$new" || new+=$'\nAutomaticSecurityReports=false'
+    if [[ $new == "$(cat "$f")" ]]; then
+      log "$f: firmware reports already off"
+      continue
+    fi
+    backup "$f"
+    printf '%s\n' "$new" > "$f"
+    restorecon -F "$f" 2>/dev/null || true
+    log "$f: firmware reports off (no report address, nothing automatic)"
+    changed=1
+  done
+  if (( changed )); then
+    systemctl try-restart fwupd.service >/dev/null 2>&1 || true
+  fi
+}
+
 sec_autoupdate() {
   local conf=/etc/rpm-ostreed.conf
   case $AUTO_UPDATE_POLICY in
@@ -1401,13 +1430,28 @@ sec_autoupdate() {
 
   # Firmware: metadata only. Installing (UEFI dbx, device firmware) stays a reviewed
   # admin step (docs/secure-boot.md, Revocation list): fwupd never installs by itself.
+  # Reports first: with AutomaticReports=true a plain `fwupdmgr refresh` uploads any
+  # unreported update (lessons-learned.md, fwupd).
+  if [[ $FIRMWARE_REPORTS == no ]]; then
+    fwupd_reports_off
+  fi
   if [[ $FIRMWARE_METADATA_REFRESH == yes ]]; then
     if ! unit_exists fwupd-refresh.timer; then
       warn "no fwupd-refresh.timer: firmware metadata left as it is"
-    elif systemctl enable --now fwupd-refresh.timer >/dev/null 2>&1; then
-      log "fwupd-refresh.timer on (firmware metadata daily, nothing installed)"
     else
-      warn "could not enable fwupd-refresh.timer"
+      write_file /etc/systemd/system/fwupd-refresh.timer.d/50-once-a-day.conf 0644 <<'EOF'
+# silverblue-cis-hardening: firmware metadata once a day (Fedora's timer: every hour)
+[Timer]
+OnCalendar=
+OnCalendar=daily
+EOF
+      systemctl daemon-reload
+      if systemctl enable fwupd-refresh.timer >/dev/null 2>&1 \
+          && systemctl restart fwupd-refresh.timer >/dev/null 2>&1; then
+        log "fwupd-refresh.timer on (firmware metadata once a day, nothing installed)"
+      else
+        warn "could not enable fwupd-refresh.timer"
+      fi
     fi
   fi
 

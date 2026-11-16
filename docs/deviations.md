@@ -205,7 +205,7 @@ Most FAIL rows are Fedora build options (signed Fedora kernel, not changed here)
   `kernel.warn_limit = 100`, `kernel.oops_limit = 100` (kept journal 2026-08 .. 11: no WARN /
   Oops line at all), `vm.mmap_rnd_bits = 32`, `vm.mmap_rnd_compat_bits = 16` (kernel
   maximum; 32-bit Steam client and games: test after the reboot).
-- Audit rule `io-uring` (b64 + b32 `io_uring_setup`): every hit is a refused try. Rules: 75.
+- Audit rule `io-uring` (b64 + b32 `io_uring_setup`): every hit is a refused try. Rules: 74 on 2026-11-16 (47 + 27 setuid programs).
 - kargs: `hash_pointers=always` (hashed %p in every log, also for root),
   `proc_mem.force_override=never` (no write to read-only memory of a process through
   /proc/<pid>/mem; debuggers may break), `module.sig_enforce=1` (signed modules only even

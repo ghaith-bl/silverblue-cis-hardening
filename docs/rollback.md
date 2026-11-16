@@ -46,6 +46,8 @@ sudo rpm-ostree cleanup -p                       # drop a staged (not yet booted
 sudo systemctl disable --now flatpak-update-system.timer && sudo systemctl --global disable flatpak-update-user.timer
 sudo systemctl disable --now browsevm-update.timer   # browsevm: no daily base rebuild
 sudo systemctl disable --now fwupd-refresh.timer     # no daily firmware metadata
+sudo rm /etc/systemd/system/fwupd-refresh.timer.d/50-once-a-day.conf && sudo systemctl daemon-reload   # Fedora's hourly timer again
+sudo cp -a /var/backups/hardening/<time>/etc/fwupd/remotes.d/. /etc/fwupd/remotes.d/ && sudo systemctl try-restart fwupd   # report settings before FIRMWARE_REPORTS=no
 sudo rpm-ostree kargs --delete=initcall_blacklist=af_alg_init   # then reboot
 sudo rpm-ostree kargs --delete=page_alloc.shuffle=1 --delete=rd.shell=0 --delete=rd.emergency=halt
 sudo rpm-ostree kargs --delete=init_on_free=1 --delete=iommu.strict=1

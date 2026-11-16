@@ -139,6 +139,27 @@
   every `CONFIG_MITIGATION_*=y`: read the kconfig rows before trusting a cmdline FAIL.
   Run it unprivileged on copies made by root (`sysctl -a` needs root for 0600 files).
 
+## fwupd
+
+- `/etc/fwupd/remotes.d/lvfs.conf` can hold `AutomaticReports=true` and
+  `AutomaticSecurityReports=true` (most likely an earlier "yes" to "upload automatically in the
+  future?"; the file was already changed on 2026-11-15). Then `fwupdmgr refresh` uploads
+  every unreported update by itself, also with no terminal: admin script 24
+  (2026-11-16) sent the report of an older Secure Boot key (KEK) update that way.
+- Off for good: comment out `ReportURI` in every remote (no address = nothing to send,
+  even after a "yes" by mistake) and set both `Automatic*Reports=false`
+  (`FIRMWARE_REPORTS=no`). In scripts every `fwupdmgr` call gets `--no-unreported-check`.
+- Fedora 44's `fwupd-refresh.timer` runs every hour (`OnCalendar=*-*-* *:00:00`,
+  `RandomizedDelaySec=1h`), not daily: a drop-in sets `OnCalendar=daily`.
+
+## Audit rules and OS updates
+
+- The setuid / setgid list under `/usr` changes with image updates: 28 programs on
+  2026-11-03 (`mullvad-exclude` added), 27 on 2026-11-16 (`/usr/bin/userhelper` no longer
+  in the image). `audit-rules` writes one `privileged` rule per program, so a fixed rule
+  count in a checker breaks; run the section again after updates. sectop compares the
+  `privileged` rules with the programs it finds (posture `audit-rules`).
+
 ## Audio
 
 - Laptop mic and speakers share one HDA codec (ALC285) -> blacklisting the driver kills all sound.

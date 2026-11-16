@@ -55,8 +55,8 @@ Tests run after hardening + reboot. All passed.
 
 | Check | Command | Expected |
 |-------|---------|----------|
-| audit rules loaded | `sudo auditctl -l \| wc -l` | 73 (this host; changes with the setuid list) |
-| setuid / setgid audited | `sudo auditctl -l \| grep -c 'key=privileged'` | `find /usr -xdev -type f \( -perm -4000 -o -perm -2000 \) \| wc -l` (28 on 2026-11-01) |
+| audit rules loaded | `sudo auditctl -l \| wc -l` | 74 (this host 2026-11-16: 47 + one per setuid program; changes with the setuid list) |
+| setuid / setgid audited | `sudo auditctl -l \| grep -c 'key=privileged'` | `find /usr -xdev -type f \( -perm -4000 -o -perm -2000 \) \| wc -l` (the same number; 27 on 2026-11-16) |
 | audit rules locked | `sudo auditctl -s \| grep enabled` | `enabled 2` |
 | lock refuses changes | `sudo auditctl -w /tmp -p wa -k test`; `sudo auditctl -l \| wc -l` | error; count unchanged |
 | audit at boot | `grep -o 'audit[^ ]*' /proc/cmdline` | `audit=1`, `audit_backlog_limit=8192` |
@@ -100,7 +100,8 @@ Tests run after hardening + reboot. All passed.
 | autoupdate: OS | `rpm-ostree status \| grep AutomaticUpdates`; `systemctl list-timers rpm-ostreed-automatic.timer` | `stage; rpm-ostreed-automatic.timer: last run ...`; a next run |
 | autoupdate: staged | `rpm-ostree status` after a run with updates | a deployment marked `(staged)`; booted after the next reboot |
 | autoupdate: Flatpak | `systemctl list-timers flatpak-update-system.timer`; `systemctl --user list-timers flatpak-update-user.timer` (daily user); `journalctl -u flatpak-update-system` | both timers listed; runs without errors |
-| autoupdate: firmware metadata | `systemctl list-timers fwupd-refresh.timer`; `fwupdmgr get-remotes` | timer listed; `lvfs` enabled, recent metadata |
+| autoupdate: firmware metadata | `systemctl list-timers fwupd-refresh.timer`; `systemctl cat fwupd-refresh.timer`; `fwupdmgr get-remotes` | timer listed, next run within a day; drop-in `50-once-a-day.conf` with `OnCalendar=daily`; `lvfs` enabled, recent metadata |
+| autoupdate: no firmware reports | `fwupdmgr --no-unreported-check get-remotes \| grep -E 'Report URI\|Automatic'`; `grep -h ReportURI /etc/fwupd/remotes.d/*.conf` | no `Report URI` line; only commented `#ReportURI=` lines |
 | revocation list (dbx) current | `fwupdmgr get-updates` | no `UEFI dbx` update left (see secure-boot.md) |
 | browsevm update | `systemctl list-timers browsevm-update.timer`; `journalctl -u browsevm-update.service`; `cat /var/lib/browsevm/base.info` | daily run; `nothing to do` or a rebuild with versions before / now |
 | AF_ALG off (kernel arg) | `grep -o 'initcall_blacklist=[^ ]*' /proc/cmdline` | `initcall_blacklist=af_alg_init` |
