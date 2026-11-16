@@ -3,7 +3,7 @@
 #
 # Layers:
 #   inet firewalld        -> ingress owner (zones), untouched
-#   inet hostfw (this)    -> egress, forward, inbound logging
+#   inet hostfw (this)    -> egress, forward, inbound logging + discovery drop
 #   inet mullvad          -> Mullvad app kill switch (lockdown), untouched
 #   ip libvirt_network    -> untouched
 #
@@ -16,6 +16,7 @@
 # noscope (GNOME Shell's shared cgroup) has its own switch, chain `enforce_noscope`:
 # `hostfw noscope observe | enforce`.
 # out_split (split tunneling) has no switch: rejected in every mode.
+# in_disco (discovery ports to the host) has no switch: dropped in every mode.
 #
 # Naming contract (sectop):
 #   log prefix  HFW-<DIR>-<NAME>:     DIR = OUT | IN | FWD
@@ -130,6 +131,7 @@ table inet hostfw {
 	counter out_leak         { comment "host to internet outside the tunnel" }
 	counter fwd_vm_lan       { comment "VM to LAN / outside the tunnel / across an isolated bridge" }
 	counter fwd_in           { comment "new forwarded traffic not from a VM" }
+	counter in_disco         { comment "discovery ports to the host (mDNS LLMNR SSDP WSD NetBIOS NAT-PMP Steam LAN): dropped in every mode" }
 	counter in_noise         { comment "LAN broadcast / multicast to host" }
 	counter in_lan           { comment "new inbound from uplink (firewalld drops)" }
 	counter in_vpn           { comment "new inbound from tunnel (firewalld drops)" }
@@ -247,6 +249,13 @@ table inet hostfw {
 
 	# ---------- inbound: log only, firewalld zones decide ----------
 
+	# explicit, every mode, no log (LAN chatter): the same ports out_disco rejects on the
+	# way out never reach a program here, whatever a firewalld zone allows (2026-11-16)
+	chain drop_in_disco {
+		counter name "in_disco"
+		drop
+	}
+
 	chain log_in_noise {
 		counter name "in_noise"
 		limit rate 6/minute burst 10 packets log prefix "HFW-IN-NOISE: " level info
@@ -328,10 +337,12 @@ table inet hostfw {
 
 	chain input {
 		type filter hook input priority filter - 10; policy accept;
-		comment "log only - accept here hands over to firewalld"
+		comment "log only (+ in_disco drop) - accept here hands over to firewalld"
 
 		ct state established,related accept comment "in_est"
 		iifname "lo" accept comment "in_lo"
+		udp dport { 137, 138, 1900, 3702, 5351, 5353, 5355, 27036 } goto drop_in_disco comment "in_disco"
+		tcp dport { 5355, 5357, 5358, 27036, 27037 } goto drop_in_disco comment "in_disco"
 		iifname @if_vm accept comment "in_vm"
 		icmpv6 type { nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert, mld-listener-query } accept comment "in_ndp6"
 		udp sport 67 udp dport 68 accept comment "in_dhcp4"

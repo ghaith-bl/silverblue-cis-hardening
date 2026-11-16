@@ -97,18 +97,26 @@ observe-log.md (2026-11-01, 2026-11-05).
 | 6 | fwd_vm_lan | if_vm -> anything else (LAN, uplink) | deny | HFW-FWD-VM-LAN |
 | 7 | fwd_in | any other new forwarded flow | deny | HFW-FWD-IN |
 
-## input (log only - firewalld zones decide)
+## input (log only - firewalld zones decide; one explicit drop: in_disco)
 
 | # | comment | match | action | prefix |
 |---|---|---|---|---|
 | 1 | in_est | ct established,related | pass | - |
 | 2 | in_lo | iif lo | pass | - |
-| 3 | in_vm | iif virbr0 | pass (libvirt zone decides) | - |
-| 4 | in_ndp6 | icmpv6 RA, NS, NA, MLD query | pass | - |
-| 5 | in_dhcp4 | udp 67 -> 68 | pass | - |
-| 6 | in_noise | not wg0-mullvad, broadcast / multicast | pass + sampled log | HFW-IN-NOISE |
-| 7 | in_vpn | iif wg0-mullvad, ct new | pass + log | HFW-IN-VPN |
-| 8 | in_lan | anything else, ct new | pass + log | HFW-IN-LAN |
+| 3 | in_disco | udp 137 138 1900 3702 5351 5353 5355 27036, tcp 5355 5357 5358 27036 27037 (any interface, VM bridges too) | drop in every mode, counted | - |
+| 4 | in_vm | iif virbr0 | pass (libvirt zone decides) | - |
+| 5 | in_ndp6 | icmpv6 RA, NS, NA, MLD query | pass | - |
+| 6 | in_dhcp4 | udp 67 -> 68 | pass | - |
+| 7 | in_noise | not wg0-mullvad, broadcast / multicast | pass + sampled log | HFW-IN-NOISE |
+| 8 | in_vpn | iif wg0-mullvad, ct new | pass + log | HFW-IN-VPN |
+| 9 | in_lan | anything else, ct new | pass + log | HFW-IN-LAN |
+
+`in_disco` (2026-11-16, decision: block explicitly): the discovery ports `out_disco` rejects
+on the way out are dropped on the way in too, whatever a firewalld zone allows (a
+service added by mistake, `mdns` in a zone). No log: phones and TVs send mDNS / SSDP all
+the time; the counter is exact. Drop, not reject: no answer to a scanner on the LAN.
+Steam keeps its sockets open (udp 27036, mDNS udp 5353, most likely its built-in browser, also
+with Remote Play and LAN transfers off): nothing reaches them, nothing leaves them.
 
 `*-NEW` = audit of allowed flows via the tunnel (sectop):
 - `ct new` = packets of a flow before its first reply: 1 line per TCP connect,

@@ -63,9 +63,12 @@ AUTO_UPDATE_POLICY="stage"   # autoupdate section: rpm-ostree automatic updates 
                              # download + prepare, applied at the next reboot; "check" = only look;
                              # "none" = off (manual rpm-ostree upgrade)
 FLATPAK_AUTO_UPDATE="yes"    # autoupdate section: Flatpaks (system + every user's) updated daily; "no" = leave
-FIRMWARE_METADATA_REFRESH="yes"  # autoupdate section: fwupd-refresh.timer once a day (LVFS metadata through
-                             # the tunnel; Fedora's own timer: every hour); fwupd never installs
-                             # firmware by itself; "no" = leave
+FIRMWARE_METADATA_REFRESH="yes"  # autoupdate section: fwupd-refresh.timer on FIRMWARE_METADATA_CALENDAR
+                             # (LVFS metadata through the tunnel; Fedora's own timer: every
+                             # hour); fwupd never installs firmware by itself; "no" = leave
+FIRMWARE_METADATA_CALENDAR="*-*-1/2"  # systemd OnCalendar of that timer: every second day
+                             # (odd days of the month, 00:00 + up to 1 h random; missed while
+                             # off: at boot)
 FIRMWARE_REPORTS="no"        # autoupdate section: "no" = fwupd sends no reports to LVFS (no report
                              # address in /etc/fwupd/remotes.d, nothing automatic); other = leave
 APP_UNITS=(brave-browser)    # appunit section: desktop ids started as their own service (launcher
@@ -1438,17 +1441,24 @@ sec_autoupdate() {
   if [[ $FIRMWARE_METADATA_REFRESH == yes ]]; then
     if ! unit_exists fwupd-refresh.timer; then
       warn "no fwupd-refresh.timer: firmware metadata left as it is"
+    elif ! systemd-analyze calendar "$FIRMWARE_METADATA_CALENDAR" >/dev/null 2>&1; then
+      warn "FIRMWARE_METADATA_CALENDAR '$FIRMWARE_METADATA_CALENDAR': not a systemd calendar - timer left as it is"
     else
-      write_file /etc/systemd/system/fwupd-refresh.timer.d/50-once-a-day.conf 0644 <<'EOF'
-# silverblue-cis-hardening: firmware metadata once a day (Fedora's timer: every hour)
+      local dropin=/etc/systemd/system/fwupd-refresh.timer.d
+      if [[ -f $dropin/50-once-a-day.conf ]]; then         # name until 2026-11-16
+        backup "$dropin/50-once-a-day.conf"
+        rm -f "$dropin/50-once-a-day.conf"
+      fi
+      write_file "$dropin/50-schedule.conf" 0644 <<EOF
+# silverblue-cis-hardening: firmware metadata on a calendar (Fedora's timer: every hour)
 [Timer]
 OnCalendar=
-OnCalendar=daily
+OnCalendar=$FIRMWARE_METADATA_CALENDAR
 EOF
       systemctl daemon-reload
       if systemctl enable fwupd-refresh.timer >/dev/null 2>&1 \
           && systemctl restart fwupd-refresh.timer >/dev/null 2>&1; then
-        log "fwupd-refresh.timer on (firmware metadata once a day, nothing installed)"
+        log "fwupd-refresh.timer on ($FIRMWARE_METADATA_CALENDAR, firmware metadata only, nothing installed)"
       else
         warn "could not enable fwupd-refresh.timer"
       fi

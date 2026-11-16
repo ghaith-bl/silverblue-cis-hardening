@@ -49,6 +49,7 @@ Tests run after hardening + reboot. All passed.
 | admin on the console | Ctrl+Alt+F3, admin login, `sudo -v` | OK |
 | helper channel | `ls -ld /run/sectop-user/null; ls -l /run/sectop-user/null` | `null sectop-feed` 0750, `socks.json` 0640 |
 | daily user can't read sectop | as null: `cat /run/sectop/state.json` | Permission denied |
+| discovery ports dropped inbound | `sudo nft list chain inet hostfw input \| grep -c in_disco`; later `sudo hostfw counters \| grep in_disco` | `2`; in_disco grows on a LAN with phones / TVs (mDNS, SSDP) |
 | split tunneling blocked | as null: `mullvad-exclude curl -m 10 https://am.i.mullvad.net/connected`; `sudo hostfw counters \| grep out_split` | fails fast; out_split grows, `HFW-OUT-SPLIT` with UID=1000 |
 
 ## Hardening in effect
@@ -100,7 +101,7 @@ Tests run after hardening + reboot. All passed.
 | autoupdate: OS | `rpm-ostree status \| grep AutomaticUpdates`; `systemctl list-timers rpm-ostreed-automatic.timer` | `stage; rpm-ostreed-automatic.timer: last run ...`; a next run |
 | autoupdate: staged | `rpm-ostree status` after a run with updates | a deployment marked `(staged)`; booted after the next reboot |
 | autoupdate: Flatpak | `systemctl list-timers flatpak-update-system.timer`; `systemctl --user list-timers flatpak-update-user.timer` (daily user); `journalctl -u flatpak-update-system` | both timers listed; runs without errors |
-| autoupdate: firmware metadata | `systemctl list-timers fwupd-refresh.timer`; `systemctl cat fwupd-refresh.timer`; `fwupdmgr get-remotes` | timer listed, next run within a day; drop-in `50-once-a-day.conf` with `OnCalendar=daily`; `lvfs` enabled, recent metadata |
+| autoupdate: firmware metadata | `systemctl list-timers fwupd-refresh.timer`; `systemctl cat fwupd-refresh.timer`; `fwupdmgr get-remotes` | timer listed, next run within two days; drop-in `50-schedule.conf` with `OnCalendar=*-*-1/2`; `lvfs` enabled, recent metadata |
 | autoupdate: no firmware reports | `fwupdmgr --no-unreported-check get-remotes \| grep -E 'Report URI\|Automatic'`; `grep -h ReportURI /etc/fwupd/remotes.d/*.conf` | no `Report URI` line; only commented `#ReportURI=` lines |
 | revocation list (dbx) current | `fwupdmgr get-updates` | no `UEFI dbx` update left (see secure-boot.md) |
 | browsevm update | `systemctl list-timers browsevm-update.timer`; `journalctl -u browsevm-update.service`; `cat /var/lib/browsevm/base.info` | daily run; `nothing to do` or a rebuild with versions before / now |

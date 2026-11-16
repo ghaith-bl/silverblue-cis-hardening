@@ -93,7 +93,7 @@ shims revoked, ESET / CERT VU#616257). Linux gets dbx updates from LVFS through 
 Red Hat says to apply the newest one this way.
 
 - Host 2026-11-15: dbx `20250902`, LVFS metadata old (`fwupd-refresh.timer` disabled),
-  offered `20260402` (urgency high). Metadata refreshed once a day now (autoupdate section).
+  offered `20260402` (urgency high). Metadata refreshed every second day now (autoupdate section).
 - Host 2026-11-16: dbx `20260707`. fwupd reports to LVFS off (`FIRMWARE_REPORTS=no`):
   a refresh in admin script 24 had uploaded the report of an older update
   (lessons-learned.md, fwupd).

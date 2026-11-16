@@ -150,7 +150,9 @@
   even after a "yes" by mistake) and set both `Automatic*Reports=false`
   (`FIRMWARE_REPORTS=no`). In scripts every `fwupdmgr` call gets `--no-unreported-check`.
 - Fedora 44's `fwupd-refresh.timer` runs every hour (`OnCalendar=*-*-* *:00:00`,
-  `RandomizedDelaySec=1h`), not daily: a drop-in sets `OnCalendar=daily`.
+  `RandomizedDelaySec=1h`), not daily: the drop-in `50-schedule.conf` sets its own
+  `OnCalendar` (every second day since 2026-11-16; the first one, `50-once-a-day.conf`,
+  is removed by the section).
 
 ## Audit rules and OS updates
 

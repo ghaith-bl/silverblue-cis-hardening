@@ -88,7 +88,8 @@ sudo ./harden-workstation.sh all
 | `USBGUARD_BLOCK_BLUETOOTH` | `yes` | USB Bluetooth adapters blocked in the generated USBGuard rules |
 | `AUTO_UPDATE_POLICY`   | `stage`    | `autoupdate`: rpm-ostree automatic updates (daily): `stage` = ready for the next boot, `check` = only look, `none` = manual |
 | `FLATPAK_AUTO_UPDATE`  | `yes`      | `autoupdate`: system + every user's Flatpaks updated daily; `no` = leave |
-| `FIRMWARE_METADATA_REFRESH` | `yes` | `autoupdate`: firmware metadata (LVFS) once a day (Fedora's timer: every hour); firmware itself is never installed by itself |
+| `FIRMWARE_METADATA_REFRESH` | `yes` | `autoupdate`: firmware metadata (LVFS) on `FIRMWARE_METADATA_CALENDAR` (Fedora's timer: every hour); firmware itself is never installed by itself |
+| `FIRMWARE_METADATA_CALENDAR` | `*-*-1/2` | `autoupdate`: systemd `OnCalendar` of `fwupd-refresh.timer`: every second day (odd days, 00:00 + up to 1 h) |
 | `FIRMWARE_REPORTS`     | `no`       | `autoupdate`: fwupd sends no reports to LVFS (report address removed, nothing automatic); other = leave |
 | `APP_UNITS`            | `(brave-browser)` | desktop ids `appunit` starts as their own service; `()` = none |
 | `ADMIN_USER`           | `""` (env) | `accounts`: text-console admin; `""` = one account |
@@ -164,7 +165,7 @@ sudo ./harden-workstation.sh kargs    # reboot: LUKS unlock, Wi-Fi, VPN, a VM
 | `usbguard`    | not CIS: rules from the devices present, CLI root only, `usb-allow-storage`, GNOME usb-protection off. Run twice: start + test, then enable | only known devices work, locked or not; flash drive: `sudo usb-allow-storage` |
 | `appunit`     | not CIS: apps in `APP_UNITS` start as `app-<id>@<pid>.service` (Brave left GNOME Shell's cgroup) | the app in its own unit; after a Brave update run it again |
 | `time`        | chrony: NTS only (Netnod + PTB), `authselectmode require`, `minsources 2`, no pool, no DHCP NTP | no time sync without the tunnel |
-| `autoupdate`  | CIS Controls v8 7.3 / 7.4: `/etc/rpm-ostreed.conf` `AutomaticUpdatePolicy=stage` + `rpm-ostreed-automatic.timer` (OS + layered packages downloaded daily, applied at the next boot); `flatpak-update-system.timer` + global user `flatpak-update-user.timer` (daily); `fwupd-refresh.timer` once a day (firmware metadata only); fwupd reports to LVFS off | updates arrive without asking; reboot to apply the OS one (`rpm-ostree status`); firmware / dbx: `fwupdmgr get-updates`, by hand |
+| `autoupdate`  | CIS Controls v8 7.3 / 7.4: `/etc/rpm-ostreed.conf` `AutomaticUpdatePolicy=stage` + `rpm-ostreed-automatic.timer` (OS + layered packages downloaded daily, applied at the next boot); `flatpak-update-system.timer` + global user `flatpak-update-user.timer` (daily); `fwupd-refresh.timer` every second day (firmware metadata only); fwupd reports to LVFS off | updates arrive without asking; reboot to apply the OS one (`rpm-ostree status`); firmware / dbx: `fwupdmgr get-updates`, by hand |
 | `kargs`       | not CIS: `KERNEL_ARGS` via `rpm-ostree kargs` (next boot): AF_ALG off, random page allocator, no initramfs shell, freed memory zeroed, strict IOMMU, hashed pointers, no forced writes through /proc/<pid>/mem, signed modules only, IOMMU on, no debugfs, no writes to mounted block devices | no Adiantum / Serpent / Twofish LUKS, BlueZ mesh, iwd; boot failure halts; no debugfs |
 
 Reasons and costs of every not-CIS choice: [docs/deviations.md](docs/deviations.md).
