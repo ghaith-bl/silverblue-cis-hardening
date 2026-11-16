@@ -129,6 +129,9 @@
 - `ptrace_scope = 2` (since 2026-10-30): `gdb ./prog` / `strace ./prog` need sudo too (`PTRACE_TRACEME`
   needs `CAP_SYS_PTRACE`, kernel Yama docs). Yama checks attach only, so `/proc/<pid>` reads stay as before.
   Can be set back without reboot; only `3` is one-way.
+- `ptrace_scope = 3` (since 2026-11-16): no `PTRACE_ATTACH` / `PTRACE_TRACEME` for anyone, root
+  included; `/proc/<pid>/mem` and `process_vm_readv` need attach rights too, so they fail
+  as well. Reading `/proc/<pid>/status`, `cgroup`, `fd` links (sectop, `ss -p`) works as before.
 - `vm.mmap_rnd_bits` / `vm.mmap_rnd_compat_bits` are root-only files (0600), like
   `net.core.bpf_jit_harden`: a non-root checker (sectop) cannot read them.
 - kernel-hardening-checker (2026-11-15, v0.6.17.1, kernel 7.3): the 16 CPU mitigation

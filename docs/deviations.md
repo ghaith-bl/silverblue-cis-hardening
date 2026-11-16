@@ -40,7 +40,7 @@ Input for an OpenSCAP tailoring file.
 | Rule | Decision | Reason |
 |------|----------|--------|
 | `sysctl_kernel_kptr_restrict` | set `2` | stricter than the CIS value `1` (hidden from root too) |
-| `sysctl_kernel_yama_ptrace_scope` | set `2` (decision `PTRACE_SCOPE`) | admin-only attach, idea from secureblue (no ptrace by default). CIS RHEL 9 v3.0.0 accepts `1`, `2` or `3` and recommends `2`; RHEL 9 STIG (RHEL-09-213080) wants exactly `1`: finding there. Scanner fails if its profile value is `1`. Cost: `gdb` / `strace` need sudo; anti-cheat games need ptrace (GTA Online does not run on Linux anyway). Tested 2026-10-30 at runtime: Steam game, browsers, VMs OK. Undo: set `1`, `sudo sysctl --system` (no reboot) |
+| `sysctl_kernel_yama_ptrace_scope` | set `3` (decision `PTRACE_SCOPE`, 2026-11-16; `2` since 2026-10-30) | no attach for anyone, root included (KSPP); `2` was admin-only attach, idea from secureblue. CIS RHEL 9 v3.0.0 accepts `1`, `2` or `3` and recommends `2`; RHEL 9 STIG (RHEL-09-213080) wants exactly `1`: finding there. Scanner fails if its profile value is `1`. Why 3: root (or malware that got root) cannot read or inject into a running program's memory (ptrace, /proc/<pid>/mem, process_vm_readv: keyring, browser secrets). Programs that only read /proc (sectop, ps, btop, osquery, auditd) are not affected: Yama checks attach only. Cost: `gdb` / `strace` / `ltrace` / CRIU (`podman container checkpoint`) do not work, not even with sudo: use them in the lab VMs (own kernel; toolbox shares this one). Anti-cheat games need ptrace (none here). One-way until reboot. Undo: `PTRACE_SCOPE=2`, sysctl section, reboot |
 | `auditd_data_disk_full_action`, `auditd_data_retention_admin_space_left_action` | `SUSPEND` | CIS `HALT`/`SINGLE` would stop a laptop when the disk fills |
 | `auditd_data_retention_space_left_action` | `SYSLOG` | no local MTA for `EMAIL` |
 | `auditd_data_retention_max_log_file_action` | keep `ROTATE` | CIS `KEEP_LOGS` has no limit; `/var` also holds `/var/home` |
@@ -229,5 +229,4 @@ Not taken:
 | `lockdown=confidentiality` | now `integrity` (Secure Boot); confidentiality also blocks kernel memory reads by tracing / eBPF tools: decide with sectop's monitoring plans |
 | `cfi=kcfi` | kernel built without `CONFIG_CFI` (IBT is on) |
 | `kernel.perf_event_paranoid = 3` | needs a distro patch the Fedora kernel does not carry: no effect |
-| `kernel.yama.ptrace_scope = 3` | decision `PTRACE_SCOPE` (2 or 3) |
 | `efi=disable_early_pci_dma` | some machines do not boot with it: own trial later, alone |

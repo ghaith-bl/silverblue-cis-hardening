@@ -46,7 +46,7 @@ KERNEL_ARGS=(initcall_blacklist=af_alg_init page_alloc.shuffle=1 rd.shell=0 rd.e
              init_on_free=1 iommu.strict=1 hash_pointers=always proc_mem.force_override=never
              module.sig_enforce=1 intel_iommu=on debugfs=off bdev_allow_write_mounted=0)
                              # kargs section; () = add none
-PTRACE_SCOPE=2               # sysctl section: 2 = only root may trace (gdb / strace need sudo);
+PTRACE_SCOPE=3               # sysctl section: 2 = only root may trace (gdb / strace need sudo);
                              # 3 = nobody, root included, one-way until reboot
 MULLVAD_SOCKET_GROUP="mullvad"  # mullvad section: only this group may use the Mullvad CLI / GUI
                              # "" = any local user (Mullvad's default)

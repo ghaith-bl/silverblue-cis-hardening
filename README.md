@@ -93,7 +93,7 @@ sudo ./harden-workstation.sh all
 | `ADMIN_USER`           | `""` (env) | `accounts`: text-console admin; `""` = one account |
 | `DAILY_USER`           | `""` (env) | `accounts`: GNOME daily user, no sudo; also the user of the desktop steps. Give it to every run from the admin |
 | `KERNEL_ARGS`          | `(initcall_blacklist=af_alg_init page_alloc.shuffle=1 rd.shell=0 rd.emergency=halt init_on_free=1 iommu.strict=1 hash_pointers=always proc_mem.force_override=never module.sig_enforce=1 intel_iommu=on debugfs=off bdev_allow_write_mounted=0)` | kernel args of `kargs`; `()` = none |
-| `PTRACE_SCOPE`         | `2`        | `sysctl`: `2` = only root may trace, `3` = nobody (one-way until reboot) |
+| `PTRACE_SCOPE`         | `3`        | `sysctl`: `2` = only root may trace, `3` = nobody (one-way until reboot) |
 
 User names are given on the command line and stay out of git:
 `sudo ADMIN_USER=<admin> DAILY_USER=<daily> ./harden-workstation.sh ...`
@@ -137,7 +137,7 @@ sudo ./harden-workstation.sh kargs    # reboot: LUKS unlock, Wi-Fi, VPN, a VM
 
 | Section       | What it does | Visible effect |
 |---------------|--------------|----------------|
-| `sysctl`      | kernel + network hardening (`/etc/sysctl.d/90-hardening.conf`); not CIS: KSPP attack surface (io_uring off, no tty ldisc autoload, FIFO / file protection 2, SysRq off, WARN / Oops limit 100, mmap bits max) | `dmesg`, gdb / strace attach need sudo; no io_uring |
+| `sysctl`      | kernel + network hardening (`/etc/sysctl.d/90-hardening.conf`); not CIS: KSPP attack surface (io_uring off, no tty ldisc autoload, FIFO / file protection 2, SysRq off, WARN / Oops limit 100, mmap bits max) | `dmesg`; gdb / strace do not work, not even with sudo; no io_uring |
 | `modules`     | blocks unused filesystems / protocols | no HFS / UDF mounts |
 | `coredump`    | no core dumps | crashes not saved |
 | `journald`    | persistent, compressed journal, no syslog forward (drop-in + main file) | none |
