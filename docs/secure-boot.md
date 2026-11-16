@@ -84,6 +84,29 @@ Secure Boot signing certificates 2026", LWN 1079808). Present: no db update need
 - Out-of-tree modules (NVIDIA, VirtualBox, ...) do not load. Needing one again is its
   own decision, and not with a signing key on this disk.
 
+## Revocation list (dbx, 2026-11-16)
+
+Secure Boot trusts every boot file signed by a key in db unless its hash or key is in
+dbx, the firmware's revocation list. An old dbx lets an attacker boot an old, vulnerable
+but signed loader and get around Secure Boot (BlackLotus; June 2026: 11 Microsoft-signed
+shims revoked, ESET / CERT VU#616257). Linux gets dbx updates from LVFS through fwupd;
+Red Hat says to apply the newest one this way.
+
+- Host 2026-11-15: dbx `20250902`, LVFS metadata old (`fwupd-refresh.timer` disabled),
+  offered `20260402` (urgency high). Metadata refreshed daily now (autoupdate section).
+- fwupd refuses the update when a boot file on the ESP would be revoked by it (also the
+  unused fallback `EFI/BOOT/BOOTX64.EFI`): update or remove that file first
+  (`sudo bootupctl update`). LUKS needs no TPM reseal here (password only).
+- Applied by hand from the admin console, never automatic:
+
+      sudo fwupdmgr refresh --force
+      fwupdmgr get-updates                         # UEFI dbx: current -> newest
+      sudo fwupdmgr update <UEFI dbx device id>    # Y to the update, no to the report upload
+      # reboot, then: fwupdmgr get-updates -> no dbx update left
+
+- Back: only through the firmware setup (factory keys), which also brings back the old
+  dbx. Not planned.
+
 ## Rollback
 
 Firmware setup: Secure Boot Control `Disabled` -> boots as before. The NVIDIA driver

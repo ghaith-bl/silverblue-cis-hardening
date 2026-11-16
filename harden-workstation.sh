@@ -63,6 +63,8 @@ AUTO_UPDATE_POLICY="stage"   # autoupdate section: rpm-ostree automatic updates 
                              # download + prepare, applied at the next reboot; "check" = only look;
                              # "none" = off (manual rpm-ostree upgrade)
 FLATPAK_AUTO_UPDATE="yes"    # autoupdate section: Flatpaks (system + every user's) updated daily; "no" = leave
+FIRMWARE_METADATA_REFRESH="yes"  # autoupdate section: fwupd-refresh.timer (LVFS metadata daily, through
+                             # the tunnel); fwupd never installs firmware by itself; "no" = leave
 APP_UNITS=(brave-browser)    # appunit section: desktop ids started as their own service (launcher
                              # forks before GNOME moves it: Chromium family); () = none
 ADMIN_USER="${ADMIN_USER:-}" # accounts section: CLI-only admin (wheel, text console, hidden
@@ -1395,6 +1397,18 @@ sec_autoupdate() {
     rpm-ostree status 2>/dev/null | grep -E 'AutomaticUpdates' || true
   else
     warn "no rpm-ostree / $conf: OS updates left as they are"
+  fi
+
+  # Firmware: metadata only. Installing (UEFI dbx, device firmware) stays a reviewed
+  # admin step (docs/secure-boot.md, Revocation list): fwupd never installs by itself.
+  if [[ $FIRMWARE_METADATA_REFRESH == yes ]]; then
+    if ! unit_exists fwupd-refresh.timer; then
+      warn "no fwupd-refresh.timer: firmware metadata left as it is"
+    elif systemctl enable --now fwupd-refresh.timer >/dev/null 2>&1; then
+      log "fwupd-refresh.timer on (firmware metadata daily, nothing installed)"
+    else
+      warn "could not enable fwupd-refresh.timer"
+    fi
   fi
 
   if [[ $FLATPAK_AUTO_UPDATE != yes ]]; then

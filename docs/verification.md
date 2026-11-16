@@ -100,6 +100,8 @@ Tests run after hardening + reboot. All passed.
 | autoupdate: OS | `rpm-ostree status \| grep AutomaticUpdates`; `systemctl list-timers rpm-ostreed-automatic.timer` | `stage; rpm-ostreed-automatic.timer: last run ...`; a next run |
 | autoupdate: staged | `rpm-ostree status` after a run with updates | a deployment marked `(staged)`; booted after the next reboot |
 | autoupdate: Flatpak | `systemctl list-timers flatpak-update-system.timer`; `systemctl --user list-timers flatpak-update-user.timer` (daily user); `journalctl -u flatpak-update-system` | both timers listed; runs without errors |
+| autoupdate: firmware metadata | `systemctl list-timers fwupd-refresh.timer`; `fwupdmgr get-remotes` | timer listed; `lvfs` enabled, recent metadata |
+| revocation list (dbx) current | `fwupdmgr get-updates` | no `UEFI dbx` update left (see secure-boot.md) |
 | browsevm update | `systemctl list-timers browsevm-update.timer`; `journalctl -u browsevm-update.service`; `cat /var/lib/browsevm/base.info` | daily run; `nothing to do` or a rebuild with versions before / now |
 | AF_ALG off (kernel arg) | `grep -o 'initcall_blacklist=[^ ]*' /proc/cmdline` | `initcall_blacklist=af_alg_init` |
 | AF_ALG socket fails | `python3 -I -c 'import socket; socket.socket(socket.AF_ALG, socket.SOCK_SEQPACKET)'` | `OSError: [Errno 97] Address family not supported by protocol` |

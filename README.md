@@ -88,6 +88,7 @@ sudo ./harden-workstation.sh all
 | `USBGUARD_BLOCK_BLUETOOTH` | `yes` | USB Bluetooth adapters blocked in the generated USBGuard rules |
 | `AUTO_UPDATE_POLICY`   | `stage`    | `autoupdate`: rpm-ostree automatic updates (daily): `stage` = ready for the next boot, `check` = only look, `none` = manual |
 | `FLATPAK_AUTO_UPDATE`  | `yes`      | `autoupdate`: system + every user's Flatpaks updated daily; `no` = leave |
+| `FIRMWARE_METADATA_REFRESH` | `yes` | `autoupdate`: firmware metadata (LVFS) daily; firmware itself is never installed by itself |
 | `APP_UNITS`            | `(brave-browser)` | desktop ids `appunit` starts as their own service; `()` = none |
 | `ADMIN_USER`           | `""` (env) | `accounts`: text-console admin; `""` = one account |
 | `DAILY_USER`           | `""` (env) | `accounts`: GNOME daily user, no sudo; also the user of the desktop steps. Give it to every run from the admin |
@@ -162,7 +163,7 @@ sudo ./harden-workstation.sh kargs    # reboot: LUKS unlock, Wi-Fi, VPN, a VM
 | `usbguard`    | not CIS: rules from the devices present, CLI root only, `usb-allow-storage`, GNOME usb-protection off. Run twice: start + test, then enable | only known devices work, locked or not; flash drive: `sudo usb-allow-storage` |
 | `appunit`     | not CIS: apps in `APP_UNITS` start as `app-<id>@<pid>.service` (Brave left GNOME Shell's cgroup) | the app in its own unit; after a Brave update run it again |
 | `time`        | chrony: NTS only (Netnod + PTB), `authselectmode require`, `minsources 2`, no pool, no DHCP NTP | no time sync without the tunnel |
-| `autoupdate`  | CIS Controls v8 7.3 / 7.4: `/etc/rpm-ostreed.conf` `AutomaticUpdatePolicy=stage` + `rpm-ostreed-automatic.timer` (OS + layered packages downloaded daily, applied at the next boot); `flatpak-update-system.timer` + global user `flatpak-update-user.timer` (daily) | updates arrive without asking; reboot to apply the OS one (`rpm-ostree status`) |
+| `autoupdate`  | CIS Controls v8 7.3 / 7.4: `/etc/rpm-ostreed.conf` `AutomaticUpdatePolicy=stage` + `rpm-ostreed-automatic.timer` (OS + layered packages downloaded daily, applied at the next boot); `flatpak-update-system.timer` + global user `flatpak-update-user.timer` (daily); `fwupd-refresh.timer` (firmware metadata only) | updates arrive without asking; reboot to apply the OS one (`rpm-ostree status`); firmware / dbx: `fwupdmgr get-updates`, by hand |
 | `kargs`       | not CIS: `KERNEL_ARGS` via `rpm-ostree kargs` (next boot): AF_ALG off, random page allocator, no initramfs shell, freed memory zeroed, strict IOMMU, hashed pointers, no forced writes through /proc/<pid>/mem, signed modules only, IOMMU on, no debugfs, no writes to mounted block devices | no Adiantum / Serpent / Twofish LUKS, BlueZ mesh, iwd; boot failure halts; no debugfs |
 
 Reasons and costs of every not-CIS choice: [docs/deviations.md](docs/deviations.md).
@@ -202,7 +203,7 @@ else. Root stays locked.
 - [docs/deviations.md](docs/deviations.md) - what was not applied and why
 - [docs/verification.md](docs/verification.md) - tests after hardening, account split check
 - [docs/rollback.md](docs/rollback.md) - undo per section
-- [docs/secure-boot.md](docs/secure-boot.md) - Secure Boot on, NVIDIA driver removed
+- [docs/secure-boot.md](docs/secure-boot.md) - Secure Boot on, NVIDIA driver removed, revocation list (dbx)
 - [docs/mullvad.md](docs/mullvad.md) - Mullvad VPN setup
 - [docs/lessons-learned.md](docs/lessons-learned.md) - findings worth remembering
 - [firewall/README.md](firewall/README.md) - hostfw egress filter: design, rules, tests
