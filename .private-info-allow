@@ -11,3 +11,7 @@ uuid  browsevm/browsevm.ks  73a6fe31-595d-460b-a920-fcc0f8843232
 # Mullvad Browser Extension add-on ID (public, the same in every Mullvad Browser): its permissions preset
 uuid  browsevm/browsevm.ks  \{?d19a89b9-76c1-4a61-bcd4-49e8de916403\}?
 uuid  docs/browsevm.md  \{?d19a89b9-76c1-4a61-bcd4-49e8de916403\}?
+
+# host addresses of libvirt's default network and of the browse network (BROWSEVM_NET):
+# defaults of libvirt / this repo, the same on every machine that uses them
+ipv4  *  192\.168\.12[23]\.1

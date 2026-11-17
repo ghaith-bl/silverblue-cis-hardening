@@ -42,7 +42,9 @@ deviations, rollback, verification) not done yet.
 - not `default`: hostfw accepts virbr0 <-> virbr0 (`fwd_vm_cross`): lab VMs reachable
 - hostfw `if_vm_iso`: out to the tunnel only; no new flow to / from another bridge or the
   uplink (rule `fwd_vm_iso`, counter / log `fwd_vm_lan`)
-- firewalld: zone `browsevm`; policy `browsevm-to-host` REJECT with DHCP + DNS only;
+- firewalld: zone `browsevm`; policy `browsevm-to-host` REJECT with DHCP and DNS to
+  192.168.123.1 only (rich rule: a service in a policy is open on every host address; the
+  lab network's dnsmasq on 192.168.122.1:53 answered the VM, probe 2026-11-17);
   policy `browsevm-nat-out` ACCEPT (hostfw + Mullvad decide where). Same shape as
   libvirt's own `libvirt.zone`, `libvirt-to-host.policy`, `libvirt-nat-out.policy`
 - kvmlan marks the bridge: lease + DNS with Mullvad's Allow LAN off

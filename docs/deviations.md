@@ -120,7 +120,7 @@ Input for an OpenSCAP tailoring file.
   = tunnel only, no new flow to or from another bridge or the uplink (counter / log
   `fwd_vm_lan`, rule comment `fwd_vm_iso`). firewalld: zone `browsevm` + policies
   `browsevm-nat-out` (ACCEPT, hostfw decides where) and `browsevm-to-host` (REJECT, DHCP +
-  DNS only), the shape of libvirt's own zone / policies without ssh, tftp, IPv6. kvmlan
+  DNS to its own bridge address only: the VM's code counts as hostile), the shape of libvirt's own zone / policies without ssh, tftp, IPv6. kvmlan
   marks for the bridge (lease with Allow LAN off). Not autostarted.
 
 ## Brave: RPM, not Flatpak (not CIS)

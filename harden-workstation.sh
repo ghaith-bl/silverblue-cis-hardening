@@ -1186,7 +1186,7 @@ fw_policy() {
 ## to the host, nothing else), hostfw if_vm_iso (tunnel only, never a lab VM or the LAN), kvmlan
 ## marks (lease with Allow LAN off). Not autostarted: the VM unit starts it (step 3).
 sec_browsevm() {
-  local zone=browsevm net=browse xml=/etc/browsevm/network.xml want have
+  local zone=browsevm net=browse xml=/etc/browsevm/network.xml want have rule
   if ! command -v virsh >/dev/null || ! command -v firewall-cmd >/dev/null; then
     warn "virsh or firewall-cmd missing - skipped"; return 0
   fi
@@ -1202,7 +1202,11 @@ sec_browsevm() {
 
   # firewalld: zone + 2 policies, the same shape as libvirt's own (libvirt.zone,
   # libvirt-nat-out.policy, libvirt-to-host.policy) without ssh / tftp / IPv6:
-  # to the host DHCP + DNS only, rest rejected; out = ACCEPT here, hostfw decides where
+  # to the host DHCP + DNS only, rest rejected; out = ACCEPT here, hostfw decides where.
+  # DNS only to its own bridge address: a service in a policy is open on every host
+  # address, so the lab network's dnsmasq (192.168.122.1:53, knows the lab VMs' names)
+  # answered the browsing VM too (probe 2026-11-17). The VM's code counts as hostile.
+  rule="rule family=\"ipv4\" destination address=\"$BROWSEVM_NET.1\" service name=\"dns\" accept"
   if [[ " $(firewall-cmd --permanent --get-zones) " == *" $zone "* ]]; then
     log "firewalld zone $zone exists"
   else
@@ -1212,16 +1216,24 @@ sec_browsevm() {
   fi
   fw_policy "$zone-nat-out" "$zone" ANY ACCEPT || return 0
   fw_policy "$zone-to-host" "$zone" HOST REJECT || return 0
-  for want in dhcp dns; do
-    firewall-cmd --permanent --policy="$zone-to-host" --query-service="$want" >/dev/null ||
-      firewall-cmd --permanent --policy="$zone-to-host" --add-service="$want" >/dev/null ||
-      warn "policy $zone-to-host: $want not added"
-  done
+  firewall-cmd --permanent --policy="$zone-to-host" --query-service=dhcp >/dev/null ||
+    firewall-cmd --permanent --policy="$zone-to-host" --add-service=dhcp >/dev/null ||
+    warn "policy $zone-to-host: dhcp not added"
   for have in $(firewall-cmd --permanent --policy="$zone-to-host" --list-services); do
-    [[ $have == dhcp || $have == dns ]] || {
+    [[ $have == dhcp ]] || {
       firewall-cmd --permanent --policy="$zone-to-host" --remove-service="$have" >/dev/null || true
-      log "policy $zone-to-host: service $have removed"; }
+      log "policy $zone-to-host: service $have removed (dns: own bridge address only, below)"; }
   done
+  firewall-cmd --permanent --policy="$zone-to-host" --query-rich-rule="$rule" >/dev/null ||
+    firewall-cmd --permanent --policy="$zone-to-host" --add-rich-rule="$rule" >/dev/null ||
+    warn "policy $zone-to-host: DNS rule not added"
+  while IFS= read -r have; do
+    # ours (also when firewalld writes it back in another spacing / order)
+    [[ -z $have || ( $have == *"address=\"$BROWSEVM_NET.1\""* && $have == *"name=\"dns\""* ) ]] && continue
+    firewall-cmd --permanent --policy="$zone-to-host" --remove-rich-rule="$have" >/dev/null || true
+    log "policy $zone-to-host: rule removed: $have"
+  done < <(firewall-cmd --permanent --policy="$zone-to-host" --list-rich-rules)
+  log "policy $zone-to-host: DHCP, DNS to $BROWSEVM_NET.1 only, the rest rejected"
   if firewall-cmd --reload >/dev/null; then log "firewalld reloaded (own tables only: hostfw, Mullvad, kvmlan stay)"
   else warn "firewall-cmd --reload failed"; fi
 
