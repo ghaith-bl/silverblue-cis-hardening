@@ -24,6 +24,14 @@ sudo rm /etc/systemd/system/mullvad-daemon.service.d/50-socket-group.conf
 sudo systemctl daemon-reload && sudo systemctl restart mullvad-daemon
 sudo systemctl disable --now kvmlan              # VMs blocked by Mullvad again (table deleted)
 sudo rm /etc/systemd/system/kvmlan.service /etc/kvmlan.nft && sudo systemctl daemon-reload
+sudo systemctl stop 'browsevm@*' && sudo systemctl disable --now browsevm-update.timer   # browsevm: VM gone
+sudo virsh undefine browsevm
+sudo rm /etc/systemd/system/browsevm@.service /etc/systemd/system/browsevm-update.{service,timer}
+sudo rm /etc/polkit-1/rules.d/60-browsevm.rules /usr/local/sbin/browsevm-ctl /usr/local/bin/browsevm
+sudo rm /usr/local/share/applications/browsevm{,-brave}.desktop && sudo systemctl daemon-reload
+sudo rm -r /usr/local/lib/browsevm /var/lib/browsevm   # root copy for the timer, base.info
+sudo rmdir /var/lib/libvirt/browsevm-run          # tmpfs mount point (unmounted at stop)
+sudo rm /var/lib/libvirt/images/browsevm-base.qcow2 /var/lib/libvirt/images/Fedora-Everything-netinst-x86_64-45-*.iso
 sudo virsh net-destroy browse; sudo virsh net-undefine browse && sudo rm -r /etc/browsevm   # browsevm network
 sudo firewall-cmd --permanent --delete-policy=browsevm-nat-out
 sudo firewall-cmd --permanent --delete-policy=browsevm-to-host
@@ -47,6 +55,8 @@ sudo sed -i 's/^AutomaticUpdatePolicy=.*/AutomaticUpdatePolicy=none/' /etc/rpm-o
 sudo rpm-ostree cleanup -p                       # drop a staged (not yet booted) update
 sudo systemctl disable --now flatpak-update-system.timer && sudo systemctl --global disable flatpak-update-user.timer
 sudo systemctl disable --now browsevm-update.timer   # browsevm: no daily base rebuild
+sudo setsebool -P virt_use_usb on virt_use_nfs on   # svirt: Fedora's defaults
+sudo sed -i 's/^security_require_confined = 1/#security_require_confined = 1/' /etc/libvirt/qemu.conf && sudo systemctl restart virtqemud
 sudo systemctl disable --now fwupd-refresh.timer     # no firmware metadata at all
 sudo rm /etc/systemd/system/fwupd-refresh.timer.d/50-schedule.conf && sudo systemctl daemon-reload   # Fedora's hourly timer again
 sudo cp -a /var/backups/hardening/<time>/etc/fwupd/remotes.d/. /etc/fwupd/remotes.d/ && sudo systemctl try-restart fwupd   # report settings before FIRMWARE_REPORTS=no

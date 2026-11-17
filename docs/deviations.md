@@ -120,8 +120,20 @@ Input for an OpenSCAP tailoring file.
   = tunnel only, no new flow to or from another bridge or the uplink (counter / log
   `fwd_vm_lan`, rule comment `fwd_vm_iso`). firewalld: zone `browsevm` + policies
   `browsevm-nat-out` (ACCEPT, hostfw decides where) and `browsevm-to-host` (REJECT, DHCP +
-  DNS to its own bridge address only: the VM's code counts as hostile), the shape of libvirt's own zone / policies without ssh, tftp, IPv6. kvmlan
-  marks for the bridge (lease with Allow LAN off). Not autostarted.
+  DNS to its own bridge address only: the VM's code counts as hostile), the shape of
+  libvirt's own zone / policies without ssh, tftp, IPv6. kvmlan marks for the bridge
+  (lease with Allow LAN off). Not autostarted.
+  Inside the VM (choices, docs/browsevm.md):
+  - Mullvad Browser as shipped (no policy of ours: the same look as its other users),
+    security level Safer at every start; NoScript applies it, its button stays hidden
+    (the browser's default). Brave as the second browser (a site that breaks in Mullvad
+    Browser): managed policies, JIT / V8 optimizers off (its "Safer"), no extension,
+    nothing sent by itself
+  - kiosk (cage + browser) as the confined SELinux user `user_u` (user_t), not the
+    unit's domain; `NoNewPrivileges` on top
+  - base image updated by itself: rebuilt from the kept ISO when 7 days old
+    (`browsevm-update.timer`), not by hand. Nothing in the VM updates itself (every start
+    is the base again); a new base = newest Fedora packages and both browsers
 
 ## Brave: RPM, not Flatpak (not CIS)
 - Brave's own RPM repo, layered (browsers/README.md). Why: Brave's own build with the
@@ -205,7 +217,7 @@ Most FAIL rows are Fedora build options (signed Fedora kernel, not changed here)
   `kernel.warn_limit = 100`, `kernel.oops_limit = 100` (kept journal 2026-08 .. 11: no WARN /
   Oops line at all), `vm.mmap_rnd_bits = 32`, `vm.mmap_rnd_compat_bits = 16` (kernel
   maximum; 32-bit Steam client and games: test after the reboot).
-- Audit rule `io-uring` (b64 + b32 `io_uring_setup`): every hit is a refused try. Rules: 74 on 2026-11-16 (47 + 27 setuid programs).
+- Audit rule `io-uring` (b64 + b32 `io_uring_setup`): every hit is a refused try. Rules: 74 on 2026-11-16 (47 + 27 setuid programs), 73 after `guesttools` (2026-11-17: 26).
 - kargs: `hash_pointers=always` (hashed %p in every log, also for root),
   `proc_mem.force_override=never` (no write to read-only memory of a process through
   /proc/<pid>/mem; debuggers may break), `module.sig_enforce=1` (signed modules only even

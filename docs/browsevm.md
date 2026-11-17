@@ -3,8 +3,8 @@
 Status: step 1 (network) in `harden-workstation.sh browsevm`; step 2 (base image) in
 `browsevm/browsevm.sh build`; step 3 (domain, unit, polkit rule, launcher) in
 `browsevm/browsevm.sh install`; step 4 (checks) in `browsevm/browsevm.sh report` and the
-list below; updates in `browsevm/browsevm.sh update` + a daily timer. Step 5 (README,
-deviations, rollback, verification) not done yet.
+list below; updates in `browsevm/browsevm.sh update` + a daily timer. README,
+deviations, rollback, verification rows: done (2026-11-17).
 
 ## Goal
 - random links never reach the daily user's files or the system
@@ -87,7 +87,8 @@ BROWSEVM_FEDORA=44 sudo -E browsevm/browsevm.sh build   # other release
   as one of its processes lives (its start script may detach), then cage ends and the
   unit starts both again (`RestartSec=2`). CPU renderer (`WLR_RENDERER=pixman`), keyboard us + ara
   (Alt+Shift). `NoNewPrivileges=yes`: nothing the browser starts gains privileges through
-  setuid / file capabilities
+  setuid / file capabilities. cage, Xwayland and the browser run as the confined SELinux
+  user `user_u` (below). Its output goes to the journal
 - no text console on any VT: Fedora 45's console is kmscon (tty1-6), a DRM client that
   holds the display exclusively, so its login prompt was on screen instead of the kiosk
   (first start 2026-11-14). kmscon removed (or masked), `kmsconvt@` / `getty@` masked,
@@ -128,7 +129,9 @@ BROWSEVM_FEDORA=44 sudo -E browsevm/browsevm.sh build   # other release
   helper is useless under `NoNewPrivileges`)
 - which one: `browsevm-select.service` (root, before cage) reads the SMBIOS OEM string
   `browsevm-browser mullvad|brave` (`/sys/firmware/dmi/entries/11-0/raw`, root only),
-  writes `/run/browsevm-browser` (0644) for the kiosk; nothing / anything else = Mullvad
+  writes `/run/browsevm-browser` (0644, for the report) and `/run/browsevm-browser.env`
+  (`BROWSEVM_BROWSER=<name>`, read by systemd: cage unit `EnvironmentFile=`, the confined
+  kiosk user needs no read in /run); nothing / anything else = Mullvad
 - to expect: letterboxing (grey margins around the page), English for web pages asked
   at first start, a site may break under its fingerprinting protection, a black screen
   for up to a minute after the start (the browser's first start is headless, below).
@@ -270,8 +273,33 @@ in a terminal). Window closed = VM stopped.
   `virt_use_nfs` off (policy / Fedora default: on), so no QEMU process gets a host USB
   device or a file on NFS; `security_require_confined = 1` in `/etc/libvirt/qemu.conf`:
   a domain with `<seclabel type='none'/>` is refused
-- in the guest: SELinux enforcing, but cage and the browser run in the unit's domain
-  (not a confined user). Open: `xguest_u` / `user_u` for the kiosk user, a trial of its own
+
+## SELinux (guest): the kiosk as a confined user (2026-11-17)
+- user `web` mapped to `user_u` in `%post` (`usermod -Z user_u web`): cage, Xwayland, both
+  browsers, PipeWire, the user's systemd run as `user_u:user_r:user_t` (dbus-broker:
+  `user_dbusd_t`). Before: `unconfined_service_t` (the unit's domain)
+- user_t: no su / sudo / setuid gain (with `NoNewPrivileges` on top), no admin rights,
+  own home + tmp only, no access to system files a service domain may touch
+- how: `/etc/pam.d/cage` `pam_selinux.so close` ... `pam_selinux.so open`, as
+  `/etc/pam.d/systemd-user` and login do. Policy (fedora-selinux selinux-policy):
+  `user_u_default_contexts` maps `system_r:init_t:s0` to `user_r:user_t:s0`; `init.te`
+  `userdom_transition_login_userdomain(init_t)` +
+  `userdom_nnp_transition_login_userdomain(init_t)`: the transition is allowed under
+  `NoNewPrivileges`; `allow login_userdomain self:user_namespace create` (both browsers'
+  sandboxes)
+- the tty: pam_selinux relabels tty1 `user_tty_device_t` for the session (back at close,
+  like login). With `nottys` (as systemd-user) cage was refused its tty
+  (`user_t -> tty_device_t {read write}`) and exited at once (trial 1)
+- `user_u`, not `xguest_u`: Fedora's confined user tests run against user_u; xguest is
+  made for GDM guest logins, its network only http / generic ports
+  (`xguest_connect_network`)
+- report: `seuser web: user_u`, `kiosk id -Z`, label of every process of `web`, tty1
+  label, AVC count grouped by program / types. 2026-11-17: every process `user_t`
+  (except `(sd-pam)` = `init_t`, PAM's own helper), tty1 `user_tty_device_t`
+- known AVC, harmless: `Xwayland` / `glxtest` / the browser `user_t -> dma_device_t
+  {read write}` on `/dev/udmabuf` (GPU buffer sharing; CPU rendering here). The rtkit
+  `setsched` AVC of the unconfined kiosk is gone
+- way back: `semanage login -d web` in the image (or the kickstart before 2026-11-17)
 - refs: libvirt "QEMU command-line passthrough" kbase (labels: read-only
   `virt_content_t`, exclusive `svirt_image_t:s0:MCS`; seccomp), RHEL "sVirt labeling",
   selinux-policy `virt.te` (`read_files_pattern(virt_domain, virt_content_t, ...)`,
@@ -305,9 +333,7 @@ sudo browsevm/browsevm.sh report brave      # the same with Brave
   says connected, TCP to its address without DNS). The normal domain has no probe entry:
   nothing is probed
 - known lines, harmless: `virt/tdx: TDX not supported by the host platform` (kernel, no
-  TDX on this CPU); AVC `rtkit-daemon setsched` on `unconfined_service_t` + `Failed to
-  make thread ... RT` (the browser's audio thread is refused real-time priority because
-  the kiosk is not a user session; sound works)
+  TDX on this CPU); AVC on `/dev/udmabuf` (SELinux (guest), above)
 
 ## Checks (step 4)
 Admin, VM off. One report run with probes, then one normal start:
@@ -319,7 +345,9 @@ Admin, VM off. One report run with probes, then one normal start:
   `-spice` has `disable-copy-paste=on`, `disable-agent-file-xfer=on`; no `spicevmc` /
   `vdagent` on its command line. In the guest: no spice-vdagent (`pkg spice-vdagent no`)
 - lab VMs / LAN / host unreachable: probes to the host on `virbr-browse` (22), the host on
-  `virbr0`, every running lab VM (22), the LAN gateway (80): none `OPEN`. hostfw counter
+  `virbr0` (22, 53), every running lab VM (22, 53, 80), the LAN gateway (80): none `OPEN`;
+  192.168.123.1:53 `OPEN` (its own DNS). 2026-11-17 with `virbr0` up and lab VM running:
+  only the lab network's DNS answered -> DNS rule (Network, above), then `closed`. hostfw counter
   `fwd_vm_lan` grows (forwarded tries), `tcpdump` on `virbr0`: no packet from the
   browse /24
 - Mullvad disconnect = no internet: the host disconnects after round 4 and connects after
@@ -372,4 +400,5 @@ cat /var/lib/browsevm/base.info                  # date + browser versions of th
 4. checks: `ps -Z` (svirt_t + MCS), overlay gone after shutdown, no clipboard, sectop flows,
    lab VM and LAN unreachable, Mullvad disconnect = no internet (list above) (done)
 5. Brave as the second browser, `update` + daily timer (2026-11-15)
-6. README, deviations, rollback, verification rows
+6. README, deviations, rollback, verification rows; kiosk as `user_u`; DNS to its own
+   bridge only (2026-11-17)

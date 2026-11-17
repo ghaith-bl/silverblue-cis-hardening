@@ -56,8 +56,8 @@ Tests run after hardening + reboot. All passed.
 
 | Check | Command | Expected |
 |-------|---------|----------|
-| audit rules loaded | `sudo auditctl -l \| wc -l` | 74 (this host 2026-11-16: 47 + one per setuid program; changes with the setuid list) |
-| setuid / setgid audited | `sudo auditctl -l \| grep -c 'key=privileged'` | `find /usr -xdev -type f \( -perm -4000 -o -perm -2000 \) \| wc -l` (the same number; 27 on 2026-11-16) |
+| audit rules loaded | `sudo auditctl -l \| wc -l` | 73 (this host 2026-11-17: 47 + one per setuid program; changes with the setuid list) |
+| setuid / setgid audited | `sudo auditctl -l \| grep -c 'key=privileged'` | `find /usr -xdev -type f \( -perm -4000 -o -perm -2000 \) \| wc -l` (the same number; 26 on 2026-11-17, after `guesttools`) |
 | guesttools | `rpm-ostree status --booted --json \| grep -A5 requested-base-removals`; `rpm -q open-vm-tools open-vm-tools-desktop spice-vdagent`; `ls /etc/xdg/autostart \| grep -iE 'vmware\|vbox\|spice'` | the three names listed; `not installed` each; no autostart file |
 | audit rules locked | `sudo auditctl -s \| grep enabled` | `enabled 2` |
 | lock refuses changes | `sudo auditctl -w /tmp -p wa -k test`; `sudo auditctl -l \| wc -l` | error; count unchanged |
@@ -105,6 +105,9 @@ Tests run after hardening + reboot. All passed.
 | autoupdate: firmware metadata | `systemctl list-timers fwupd-refresh.timer`; `systemctl cat fwupd-refresh.timer`; `fwupdmgr get-remotes` | timer listed, next run within two days; drop-in `50-schedule.conf` with `OnCalendar=*-*-1/2`; `lvfs` enabled, recent metadata |
 | autoupdate: no firmware reports | `fwupdmgr --no-unreported-check get-remotes \| grep -E 'Report URI\|Automatic'`; `grep -h ReportURI /etc/fwupd/remotes.d/*.conf` | no `Report URI` line; only commented `#ReportURI=` lines |
 | revocation list (dbx) current | `fwupdmgr get-updates` | no `UEFI dbx` update left (see secure-boot.md) |
+| browsevm kiosk | `sudo browsevm/browsevm.sh report` (VM off; also `report brave`) | `BROWSER mullvad`, `security_slider", 2`; `seuser web: user_u`, `kiosk id -Z: user_u:user_r:user_t:s0`, every process of web `user_t` (`(sd-pam)` `init_t`), tty1 `user_tty_device_t`; AVC only `/dev/udmabuf`; brave: `BRAVE-PROFILE present` |
+| browsevm isolation | `BROWSEVM_REPORT_SECS=480 BROWSEVM_REPORT_PROBE="192.168.123.1:53 192.168.122.1:53 192.168.123.1:22 <lab VM>:22 <gateway>:80" sudo -E browsevm/browsevm.sh report` (network `default` up) | `PROBE lateral 192.168.123.1:53 OPEN`, every other target `closed` / `timeout`; 30 rounds `mullvad-check ok`; hostfw counter `fwd_vm_lan` grows |
+| browsevm VM on the host | during a session: `ps -eZ \| grep qemu`; `sudo ls -Z /var/lib/libvirt/browsevm-run/ /var/lib/libvirt/images/browsevm-base.qcow2`; `sudo virsh dumpxml browsevm \| grep -E 'clipboard\|filetransfer\|channel\|redirdev'` | `svirt_t` + its own MCS pair; overlay `svirt_image_t` + that pair, base `virt_content_t`; `copypaste='no'`, `enable='no'`, no channel / redirdev |
 | browsevm update | `systemctl list-timers browsevm-update.timer`; `journalctl -u browsevm-update.service`; `cat /var/lib/browsevm/base.info` | daily run; `nothing to do` or a rebuild with versions before / now |
 | AF_ALG off (kernel arg) | `grep -o 'initcall_blacklist=[^ ]*' /proc/cmdline` | `initcall_blacklist=af_alg_init` |
 | AF_ALG socket fails | `python3 -I -c 'import socket; socket.socket(socket.AF_ALG, socket.SOCK_SEQPACKET)'` | `OSError: [Errno 97] Address family not supported by protocol` |
