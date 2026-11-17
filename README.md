@@ -197,6 +197,8 @@ else. Root stays locked.
 - `tools/check-accounts.sh <admin> <daily>` - read-only PASS / FAIL check of the account split
 - `tools/check-private-info.sh` - private data check of the tree / history before a push
 - `tools/kargs-bench.sh before|after` - same numbers before and after a kernel arg trial
+- `tools/lint.sh [<sectop repo>]` - the CI's lint checks before a push (ASCII, bash -n,
+  shellcheck, private info); ShellCheck from a toolbox: `tools/lint.sh --setup` once
 
 ## Planned
 

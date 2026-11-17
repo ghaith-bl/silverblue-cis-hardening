@@ -16,28 +16,9 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: ASCII only
-        run: |
-          ! grep -rnIP '[^\x00-\x7F]' --exclude-dir=.git .
-
-      - name: bash syntax
-        run: |
-          for f in harden-workstation.sh tools/*.sh usbguard/*.sh appunit/*.sh firewall/*.sh browsers/*.sh \
-                   browsers/brave/*.sh browsers/firefox/*.sh browsevm/*.sh; do
-            bash -n "$f"
-          done
-          sh -n firewall/nm-dispatcher/90-hostfw-sync
-
-      - name: python syntax
-        run: python3 -I -m py_compile firewall/hostfw-noscope.py
-
-      - name: shellcheck (warnings)
+      # the same file as before a push on my machine: ASCII only, bash -n (also the
+      # kickstart's %post), python syntax, shellcheck (warnings), private info (generic)
+      - name: lint (tools/lint.sh)
         run: |
           shellcheck --version | head -2
-          shellcheck -S warning harden-workstation.sh tools/*.sh usbguard/*.sh appunit/*.sh firewall/*.sh browsers/*.sh \
-            browsevm/*.sh firewall/nm-dispatcher/90-hostfw-sync
-
-      - name: private info (working tree, generic patterns)
-        env:
-          PRIVATE_INFO_GENERIC: "1"
-        run: tools/check-private-info.sh --tree
+          tools/lint.sh
