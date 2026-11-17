@@ -204,7 +204,8 @@ say "brave policies $(grep -c '^  "' /etc/brave/policies/managed/browsevm.json) 
 # Unit from cage's wiki "Starting Cage on boot with systemd". pixman = CPU renderer.
 # Added: kmsconvt@ next to getty@ (Fedora 45: kmscon is the console of tty1-6 and takes
 # the display for itself), NoNewPrivileges (no setuid / file capability gain for
-# anything the browser starts: sudo, su, pkexec are dead ends).
+# anything the browser starts: sudo, su, pkexec are dead ends), the browser of this start
+# from browsevm-select as an environment file (read by systemd, not by the confined user).
 cat > /etc/systemd/system/cage@.service <<'UNIT'
 [Unit]
 Description=Cage Wayland kiosk on %I
@@ -222,6 +223,7 @@ NoNewPrivileges=yes
 Environment=WLR_RENDERER=pixman
 Environment=XKB_DEFAULT_LAYOUT=us,ara
 Environment=XKB_DEFAULT_OPTIONS=grp:alt_shift_toggle
+EnvironmentFile=-/run/browsevm-browser.env
 ExecStart=/usr/bin/cage -- /usr/local/bin/browsevm-kiosk
 ExecStartPost=+sh -c "tty_name='%i'; exec chvt $${tty_name#tty}"
 Restart=always
@@ -287,7 +289,9 @@ cat > /usr/local/bin/browsevm-kiosk <<'KIOSK'
 P=/home/web/.browsevm/profile
 S=/home/web/.browsevm/state
 me=$(id -u)
-B=$(cat /run/browsevm-browser 2>/dev/null)
+B=${BROWSEVM_BROWSER:-$(cat /run/browsevm-browser 2>/dev/null)}
+mkdir -p "$S"
+id -Z > "$S/context" 2>&1
 if [ "$B" = brave ]; then
   plat=x11
   [ -n "${DISPLAY:-}" ] || plat=wayland
@@ -298,7 +302,6 @@ if [ "$B" = brave ]; then
 fi
 running() { pgrep -u "$me" -f 'mullvad-?browser' >/dev/null; }
 [ -n "${DISPLAY:-}" ] || export MOZ_ENABLE_WAYLAND=1
-mkdir -p "$S"
 if [ ! -e "$S/warm" ]; then
   t0=$SECONDS
   mullvad-browser --headless --profile "$P" about:blank >/dev/null 2>&1 &
@@ -315,12 +318,26 @@ mullvad-browser --profile "$P"
 while running; do sleep 2; done
 KIOSK
 chmod 0755 /usr/local/bin/browsevm-kiosk
+# the kiosk as a confined SELinux user: web is mapped to user_u (user_t: no su / sudo /
+# setuid gain, no admin rights, own home + tmp only), and pam_selinux gives cage that
+# context the way it does for systemd --user (/etc/pam.d/systemd-user: close, then
+# "nottys open"; policy: init_t may transition, also under NoNewPrivileges, to a login
+# user domain; default context from init_t = user_r:user_t). The tty stays as it is
+# (nottys): cage reaches the display and input through logind.
 cat > /etc/pam.d/cage <<'PAM'
 auth           required        pam_unix.so nullok
 account        required        pam_unix.so
+session        required        pam_selinux.so close
 session        required        pam_unix.so
+session        required        pam_selinux.so nottys open
 session        required        pam_systemd.so
 PAM
+usermod -Z user_u web 2>/tmp/seuser.log || semanage login -a -s user_u web 2>>/tmp/seuser.log || true
+su=$(awk -F: '$1 == "web" { print $2 }' /etc/selinux/targeted/seusers 2>/dev/null)
+if [ "$su" = user_u ]; then say "seuser web user_u"
+else say "MISSING seuser web (now: ${su:-default}) $(head -c 160 /tmp/seuser.log | tr '\n' ' ')"; fi
+rm -f /tmp/seuser.log
+say "pam cage selinux lines $(grep -c pam_selinux /etc/pam.d/cage)"
 systemctl enable cage@tty1.service
 systemctl set-default graphical.target
 
@@ -380,7 +397,24 @@ B=$(cat /run/browsevm-browser 2>/dev/null)
   rpm -q kmscon
   echo "-- SELinux"
   getenforce
-  journalctl -b --no-pager -o cat -g 'avc: +denied' -n 12 | cut -c1-220
+  echo "seuser web: $(awk -F: '$1 == "web" { print $2 }' /etc/selinux/targeted/seusers)"
+  echo "kiosk id -Z: $(cat "$S/context" 2>/dev/null || echo none)"
+  getsebool user_exec_content deny_execmem 2>/dev/null | tr '\n' ' '
+  echo
+  echo "processes of web (label, pid, name):"
+  ps -u web -o label=,pid=,comm= | sort -k3 | cut -c1-110
+  for x in Xwayland cage; do
+    p=$(pgrep -o -x "$x")
+    [ -n "$p" ] && echo "$x: $(tr -d '\0' < /proc/$p/attr/current)  exe $(ls -Z "$(readlink /proc/$p/exe)" 2>/dev/null | cut -c1-110)"
+  done
+  p=$(pgrep -u web -o -f "$BP")
+  [ -n "$p" ] && echo "browser exe: $(ls -Z "$(readlink /proc/$p/exe)" 2>/dev/null | cut -c1-120)"
+  echo "tty1: $(ls -Z /dev/tty1 | cut -c1-80)"
+  echo "AVC denials this boot: $(journalctl -b --no-pager -o cat -g 'avc: +denied' | wc -l)"
+  journalctl -b --no-pager -o cat -g 'avc: +denied' |
+    sed -n 's/.*{ \([^}]*\) } for .*comm="\([^"]*\)".*scontext=[^:]*:[^:]*:\([^:]*\):[^ ]* tcontext=[^:]*:[^:]*:\([^:]*\):[^ ]* tclass=\([a-z_0-9]*\).*/\2 \3 -> \4 \5 {\1}/p' |
+    sort | uniq -c | sort -rn | head -n 25 | cut -c1-160
+  journalctl -b --no-pager -o cat -g 'avc: +denied' -n 6 | cut -c1-220
   if [ "$B" = brave ]; then
   echo "-- Brave"
   p=$(pgrep -u web -o -f 'brave.com/brave/brave')
@@ -473,7 +507,8 @@ b=$(tr -c '[:print:]' '\n' < /sys/firmware/dmi/entries/11-0/raw 2>/dev/null |
 b=${b#browsevm-browser }
 case $b in brave) ;; *) b=mullvad ;; esac
 echo "$b" > /run/browsevm-browser
-chmod 0644 /run/browsevm-browser
+echo "BROWSEVM_BROWSER=$b" > /run/browsevm-browser.env
+chmod 0644 /run/browsevm-browser /run/browsevm-browser.env
 SELECT
 chmod 0755 /usr/local/sbin/browsevm-select
 cat > /etc/systemd/system/browsevm-select.service <<'UNIT'
