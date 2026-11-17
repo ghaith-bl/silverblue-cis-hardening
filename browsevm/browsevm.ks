@@ -236,6 +236,8 @@ TTYReset=yes
 TTYVHangup=yes
 TTYVTDisallocate=yes
 StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
 PAMName=cage
 
 [Install]
@@ -322,14 +324,17 @@ chmod 0755 /usr/local/bin/browsevm-kiosk
 # setuid gain, no admin rights, own home + tmp only), and pam_selinux gives cage that
 # context the way it does for systemd --user (/etc/pam.d/systemd-user: close, then
 # "nottys open"; policy: init_t may transition, also under NoNewPrivileges, to a login
-# user domain; default context from init_t = user_r:user_t). The tty stays as it is
-# (nottys): cage reaches the display and input through logind.
+# user domain; default context from init_t = user_r:user_t). Unlike systemd --user, cage
+# holds the tty systemd opened for it: pam_selinux relabels it for the user
+# (user_tty_device_t, back at session close), the way login does. With nottys user_t was
+# refused tty_device_t and cage exited at once (trial 2026-11-17). Its output goes to the
+# journal (with a tty as input it would go to the tty).
 cat > /etc/pam.d/cage <<'PAM'
 auth           required        pam_unix.so nullok
 account        required        pam_unix.so
 session        required        pam_selinux.so close
 session        required        pam_unix.so
-session        required        pam_selinux.so nottys open
+session        required        pam_selinux.so open
 session        required        pam_systemd.so
 PAM
 usermod -Z user_u web 2>/tmp/seuser.log || semanage login -a -s user_u web 2>>/tmp/seuser.log || true
@@ -380,7 +385,7 @@ B=$(cat /run/browsevm-browser 2>/dev/null)
   echo "-- cage unit"
   systemctl show cage@tty1.service -p ActiveState -p SubState -p NRestarts -p ExecMainStatus | tr '\n' ' '
   echo
-  journalctl -b -u cage@tty1.service --no-pager -o cat -n 25 | cut -c1-200
+  journalctl -b -u cage@tty1.service --no-pager -o cat -n 40 | cut -c1-200
   echo "-- processes of web: name, SELinux label, no_new_privs"
   for p in $(pgrep -u web -x cage) $(pgrep -u web -o -f "$BP"); do
     printf '%s  %s  nnp=%s\n' "$(cat /proc/$p/comm)" "$(tr -d '\0' < /proc/$p/attr/current)" \
