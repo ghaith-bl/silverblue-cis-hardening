@@ -58,6 +58,7 @@ Tests run after hardening + reboot. All passed.
 |-------|---------|----------|
 | audit rules loaded | `sudo auditctl -l \| wc -l` | 74 (this host 2026-11-16: 47 + one per setuid program; changes with the setuid list) |
 | setuid / setgid audited | `sudo auditctl -l \| grep -c 'key=privileged'` | `find /usr -xdev -type f \( -perm -4000 -o -perm -2000 \) \| wc -l` (the same number; 27 on 2026-11-16) |
+| guesttools | `rpm-ostree status --booted --json \| grep -A5 requested-base-removals`; `rpm -q open-vm-tools open-vm-tools-desktop spice-vdagent`; `ls /etc/xdg/autostart \| grep -iE 'vmware\|vbox\|spice'` | the three names listed; `not installed` each; no autostart file |
 | audit rules locked | `sudo auditctl -s \| grep enabled` | `enabled 2` |
 | lock refuses changes | `sudo auditctl -w /tmp -p wa -k test`; `sudo auditctl -l \| wc -l` | error; count unchanged |
 | audit at boot | `grep -o 'audit[^ ]*' /proc/cmdline` | `audit=1`, `audit_backlog_limit=8192` |

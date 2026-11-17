@@ -7,6 +7,8 @@ ls /var/backups/hardening/                       # restore files from here
 sudo authselect disable-feature with-faillock    # PAM lockout off
 faillock --user "$USER" --reset                  # from a root shell, if locked
 sudo systemctl unmask <unit>                     # bring a service back
+sudo rpm-ostree override reset open-vm-tools-desktop open-vm-tools spice-vdagent   # guesttools: back at the
+                                                 # next boot; then audit-rules, reboot (setuid rule back)
 sudo rm /etc/wireplumber/wireplumber.conf.d/90-disable-mic.conf
 systemctl --user restart wireplumber
 sudo rm /etc/NetworkManager/conf.d/90-privacy.conf /etc/systemd/resolved.conf.d/90-privacy.conf

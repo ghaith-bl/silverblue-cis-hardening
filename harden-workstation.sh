@@ -29,6 +29,9 @@ set -euo pipefail
 DISABLE_USB_STORAGE="no"     # "yes" = USB flash drives / external disks stop working
 DISABLE_BLUETOOTH="no"       # "yes" = no Bluetooth headsets / game controllers
 DISABLE_AVAHI="yes"          # "no"  if you use network printers or mDNS discovery
+GUEST_TOOLS=(open-vm-tools-desktop open-vm-tools virtualbox-guest-additions spice-vdagent)
+                             # guesttools section: VM guest agents removed from the image (rpm-ostree
+                             # override remove, next boot) when this machine is not a VM; () = keep
 ENABLE_NOISY_AUDIT="no"      # "yes" = log every chmod/chown/delete/denied-open by users (very noisy with Steam/Brave)
 MAKE_AUDIT_IMMUTABLE="yes"   # "yes" = audit rules locked until reboot (-e 2): a rule change needs a reboot
 SSH_SERVER="off"             # "on" = keep sshd usable (hardened) so other machines can SSH INTO this laptop.
@@ -87,7 +90,7 @@ else
 fi
 
 BACKUP_ROOT="/var/backups/hardening/$(date +%Y%m%d-%H%M%S)"
-SECTIONS=(sysctl modules coredump journald gnome sudo pam pwage su accounts services loopback cron sshd auditd audit-rules perms mic netprivacy mullvad kvmlan browsevm svirt usbguard appunit time autoupdate kargs)
+SECTIONS=(sysctl modules coredump journald gnome sudo pam pwage su accounts services guesttools loopback cron sshd auditd audit-rules perms mic netprivacy mullvad kvmlan browsevm svirt usbguard appunit time autoupdate kargs)
 
 # -----------------------------------------------------------------------------
 # Helpers
@@ -558,6 +561,73 @@ sec_services() {
   if unit_exists nftables.service; then
     systemctl disable nftables.service >/dev/null 2>&1 || true
     systemctl mask nftables.service >/dev/null 2>&1 && log "nftables.service masked (firewalld manages nftables)"
+  fi
+}
+
+## CIS Controls v8 4.8 (uninstall unnecessary software): guest agents for VMware, VirtualBox
+## and SPICE are in Fedora's base image for when it runs as a VM. On real hardware they do
+## nothing useful, but they bring a setuid root program (vmware-user-suid-wrapper) and agents
+## started at every login. Removed from the image with rpm-ostree (new deployment, next boot),
+## only packages nothing else needs. Their setuid files leave the audit rules in the same go
+## (55-privileged.rules, loaded at that boot): rules and programs match after one reboot.
+## Way back: rpm-ostree override reset <package>, then audit-rules after the reboot.
+sec_guesttools() {
+  local p f virt removed rules=/etc/audit/rules.d/55-privileged.rules tmp
+  local -a cand=() want=() req=() caps=() gone=() other=()
+  (( ${#GUEST_TOOLS[@]} )) || { log "GUEST_TOOLS empty: guest tools kept"; return 0; }
+  command -v rpm-ostree >/dev/null || { warn "no rpm-ostree: remove ${GUEST_TOOLS[*]} with your package manager"; return 0; }
+  virt=$(systemd-detect-virt 2>/dev/null || true)
+  if [[ -n $virt && $virt != none ]]; then warn "this machine is a VM ($virt): guest tools kept"; return 0; fi
+
+  # removals already asked for (default deployment: the next boot, or the booted one)
+  removed=" $( { rpm-ostree status --json 2>/dev/null | python3 -I -c '
+import json, sys
+d = json.load(sys.stdin)["deployments"][0]
+print(" ".join(d.get("requested-base-removals", [])))' 2>/dev/null; } || true) "
+  for p in "${GUEST_TOOLS[@]}"; do
+    if [[ $removed == *" $p "* ]]; then log "$p: removal already in the image"
+    elif rpm -q "$p" >/dev/null 2>&1; then cand+=("$p")
+    else log "$p: not installed"; fi
+  done
+  (( ${#cand[@]} )) || return 0
+
+  # nothing outside this list may need a package (its name or anything it provides)
+  for p in "${cand[@]}"; do
+    mapfile -t caps < <(rpm -q --provides "$p" | awk '{ print $1 }' | sort -u)
+    mapfile -t req < <(rpm -q --qf '%{NAME}\n' --whatrequires "$p" "${caps[@]}" 2>/dev/null |
+                       grep -v '^no package requires' | sort -u)
+    other=()
+    for f in "${req[@]}"; do
+      [[ " ${cand[*]} " == *" $f "* ]] || other+=("$f")
+    done
+    if (( ${#other[@]} )); then warn "$p kept: needed by ${other[*]}"; else want+=("$p"); fi
+  done
+  (( ${#want[@]} )) || return 0
+
+  # their setuid / setgid files (still on disk until the reboot)
+  for p in "${want[@]}"; do
+    while IFS= read -r f; do
+      if [[ -f $f && ( -u $f || -g $f ) ]]; then gone+=("$f"); fi
+    done < <(rpm -ql "$p" 2>/dev/null)
+  done
+
+  if ! rpm-ostree override remove "${want[@]}" >/dev/null; then
+    warn "rpm-ostree override remove ${want[*]} failed: nothing changed"; return 0
+  fi
+  log "removed from the image, gone at the next boot: ${want[*]}"
+  log "way back: rpm-ostree override reset ${want[*]} (then reboot)"
+  if (( ${#gone[@]} )); then log "setuid / setgid files with them: ${gone[*]}"; fi
+
+  if (( ${#gone[@]} )) && [[ -f $rules ]]; then
+    tmp=$(mktemp)
+    awk -v list="${gone[*]}" '
+      BEGIN { n = split(list, g, " "); for (i = 1; i <= n; i++) drop["path=" g[i]] = 1 }
+      { for (i = 1; i <= NF; i++) if ($i in drop) next; print }' "$rules" > "$tmp"
+    if ! cmp -s "$tmp" "$rules"; then
+      write_file "$rules" 0640 < "$tmp"
+      log "audit: $(grep -c -- '-k privileged' "$rules") privileged rules from the next boot (dropped: ${gone[*]##*/})"
+    fi
+    rm -f "$tmp"
   fi
 }
 
@@ -1623,6 +1693,7 @@ main() {
       su)          sec_su ;;
       accounts)    sec_accounts ;;
       services)    sec_services ;;
+      guesttools)  sec_guesttools ;;
       loopback)    sec_loopback ;;
       cron)        sec_cron ;;
       sshd)        sec_sshd ;;

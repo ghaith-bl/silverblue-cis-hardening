@@ -70,6 +70,7 @@ sudo ./harden-workstation.sh all
 | `DISABLE_USB_STORAGE`  | `no`       | `yes` blocks USB flash drives / external disks |
 | `DISABLE_BLUETOOTH`    | `no`       | `yes` masks bluetooth.service |
 | `DISABLE_AVAHI`        | `yes`      | mDNS / network printer discovery off |
+| `GUEST_TOOLS`          | `(open-vm-tools-desktop open-vm-tools virtualbox-guest-additions spice-vdagent)` | `guesttools`: VM guest agents removed from the image on real hardware; `()` = keep |
 | `SSH_SERVER`           | `off`      | `off` masks sshd (incoming only, outgoing `ssh` works) |
 | `FINGERPRINT`          | `disable`  | turn off `with-fingerprint` before enabling faillock |
 | `MIC_DISABLE`          | `internal` | `internal` / `all` / `no`, via WirePlumber, speakers unaffected |
@@ -104,6 +105,7 @@ User names are given on the command line and stay out of git:
 
 ```bash
 sudo ./harden-workstation.sh sysctl modules coredump journald services loopback cron sshd auditd audit-rules perms mic
+sudo ./harden-workstation.sh guesttools  # after audit-rules: VM guest agents out of the image
 systemctl reboot                      # test VPN, VMs, podman, a game
 sudo ./harden-workstation.sh sudo     # then: sudo -k && sudo true
 sudo ./harden-workstation.sh gnome su # then: su - (must fail), sudo true
@@ -150,6 +152,7 @@ sudo ./harden-workstation.sh kargs    # reboot: LUKS unlock, Wi-Fi, VPN, a VM
 | `su`          | `su` limited to the empty group `sugroup` | use `sudo` |
 | `accounts`    | CIS Controls v8 5.4: admin in wheel, hidden from and refused by GDM; daily user out of wheel, `mullvad`, `sectop`; homes 0700. Run 2 only from the admin | admin: text console only; daily user: no sudo, no Mullvad CLI |
 | `services`    | mask rpcbind / nfs / avahi, nftables.service | no mDNS |
+| `guesttools`  | CIS Controls v8 4.8: `GUEST_TOOLS` removed from the image (`rpm-ostree override remove`, next boot) when the machine is not a VM and nothing else needs them: one setuid root program (`vmware-user-suid-wrapper`) and three agents started at login less. Their setuid files leave `55-privileged.rules` in the same go | none on real hardware; one reboot |
 | `loopback`    | firewalld: `lo` in zone `trusted`, 127.0.0.1 / ::1 as source only toward themselves | none |
 | `cron`        | root-only cron dirs (modes set again at every boot by tmpfiles), `cron.allow` / `at.allow` | crontab: root + the daily user; `at`: root only |
 | `sshd`        | hardened drop-in `40-cis.conf`, server masked | no incoming SSH |
