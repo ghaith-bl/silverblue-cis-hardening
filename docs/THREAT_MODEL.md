@@ -1,9 +1,31 @@
 # Threat model
 
-For whom this setup is, what it protects, against which capabilities, and what it cannot
-do. Every choice: [deviations.md](deviations.md); tests: [verification.md](verification.md).
-State: 2026-11-18 (host measured the same day: Secure Boot, LUKS, Thunderbolt, audit,
-journal, network profiles, OpenSCAP).
+What this is: privacy and security hardening of one Fedora Silverblue laptop, kept in
+public as a documented method. The method is public, the private data is not. It is
+never finished: protections are studied, tested and added all the time, and this model
+changes with them.
+
+In short, what is in place (host measured 2026-11-18):
+- three firewall layers: firewalld (inbound: zone `drop`), Mullvad lockdown (nothing
+  outside the VPN tunnel, also while disconnected), hostfw from this repo (outbound by
+  destination, port and program scope; the LAN blocked; every leak logged)
+- kernel hardening (KSPP based): no ptrace for anyone (`ptrace_scope = 3`), no forced
+  writes through /proc/<pid>/mem, kernel pointers and logs hidden, no unprivileged
+  eBPF, JIT hardened, io_uring and kexec off, page allocator shuffled
+  (`page_alloc.shuffle=1`), memory wiped on free (`init_on_free=1`), strict IOMMU, only
+  signed modules, Secure Boot + lockdown `integrity`, more address randomization, AF_ALG off
+- isolation: random links in a throwaway VM (browsevm: confined, own network, disk in RAM,
+  its window in its own sandbox); programs in their own systemd units, so the firewall
+  knows who sends
+- accounts: a daily user without sudo, an admin only on a text console, root locked
+- devices: USBGuard (only known USB devices), microphone off, no camera, location service
+  off (host; into the script: planned)
+- network privacy: random MAC per network, a generic hostname, no DHCP ids from the
+  machine, DNS only through the tunnel, no LLMNR / mDNS
+- detection: auditd (73 rules, locked until reboot), journald, sectop (live view)
+
+This file: for whom, what it protects, against which capabilities, what it cannot do.
+Every choice: [deviations.md](deviations.md); tests: [verification.md](verification.md).
 
 ## For whom
 - one owner, one daily-driver laptop (Fedora Silverblue 44), two accounts: a daily GUI
@@ -79,8 +101,8 @@ connection. Tor, Qubes and Tails list the same kind of limits.
 - account / behavior: an anonymous VPN account; logging in to an account links sessions
   whatever the network does (a practice of the user, not something a config can enforce)
 - limits: a VPN moves trust to the provider (pseudonymity, not anonymity); the strongest
-  unlinkability here is Tor Browser; the host and browsevm share the VPN exit IP;
-  an observer of both ends of a connection can correlate timing (Tor's own design papers
+  unlinkability here is Tor Browser; browsevm uses the host's VPN exit unless the Mullvad
+  extension's proxy is on; an observer of both ends of a connection can correlate timing (Tor's own design papers
   say Tor does not defend against this)
 
 ## Accepted risks (state 2026-11-18)
@@ -91,8 +113,12 @@ connection. Tor, Qubes and Tails list the same kind of limits.
 - boot chain: Secure Boot checks shim, GRUB and the kernel, not the initramfs; `/boot` is
   not encrypted. With repeated access someone can change the initramfs or the boot
   entries and record the LUKS passphrase. The GRUB password protects the menu only.
-  Habit: the laptop is not left alone in untrusted places. Later: a TOTP check of the
-  boot state in a lab, a signed unified kernel image when Silverblue supports one
+  The initramfs cannot be encrypted: it is the program that asks for the passphrase and
+  runs before the disk is open. The fix is to verify it: a signed unified kernel image
+  (kernel + initramfs + command line in one signed file). Fedora 44 has sealed Atomic
+  Desktop images built that way as tests (systemd-boot, UKI, composefs with fs-verity),
+  not official yet: watch, try in a VM. Until then: the laptop is not left alone in
+  untrusted places; a TOTP check of the boot state (tpm2-totp) in a lab
 - LUKS `allow-discards` (decision 2026-11-18: kept): TRIM keeps the SSD fast and long-lived;
   a thief can see which blocks are free, not their content or any key
 - user namespaces stay on: Flatpak, rootless Podman, Brave's sandbox, glycin, bwrap
@@ -104,13 +130,17 @@ connection. Tor, Qubes and Tails list the same kind of limits.
   network's DNS (until netprivacy runs again)
 - time: the clock audit rule leaves out chronyd (it adjusts the clock all the time); NTS
   needs a roughly right clock: far off = set by hand
-- browsevm: isolation, not anonymity: it uses the host's VPN exit IP
+- browsevm: Mullvad Browser with the Mullvad extension's proxy on exits from another
+  Mullvad server than the host (Mullvad itself sees both); Brave, or the proxy off: the
+  host's VPN exit. Tor Browser in browsevm: planned
 - Thunderbolt: security level `user`, DMA protection by the IOMMU on (measured
   `iommu_dma_protection` 1); a new device needs approval
-- journal: persistent, months of history (2.9 GB, since 2026-07 on 2026-11-18); a time
-  limit is still to decide
-- browsevm viewer (beta): its sound socket can also record other programs' sound; no
-  seccomp filter yet
+- journal: persistent; only journald's default size cap (10 % of the filesystem, at most
+  4 GiB): 2.9 GB, history since 2026-07 (measured 2026-11-18). A time limit: decided in
+  the journald step
+- browsevm viewer (beta): the sound socket it needs for the VM's sound would also let a
+  taken-over viewer listen to what other programs play (not the microphone: off); no
+  system-call filter (seccomp) yet
 
 ## Assumptions
 - the owner keeps physical control most of the time
@@ -122,4 +152,6 @@ connection. Tor, Qubes and Tails list the same kind of limits.
 - compliance certification: CIS is the measuring tool, not the target
 - hiding that a VPN or Tor is used: the ISP sees an encrypted tunnel
 - anti-forensics after a forced unlock
-- a published map for an attacker: no account names, no addresses in this repo
+- a map for an attacker: the method is public, the private data is not. No account
+  names, addresses, network names, device ids or raw scan reports in this repo
+- a final state: the work goes on (new protections studied, tested, added)
