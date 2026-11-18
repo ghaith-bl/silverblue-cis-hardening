@@ -134,6 +134,12 @@ Input for an OpenSCAP tailoring file.
   - base image updated by itself: rebuilt from the kept ISO when 7 days old
     (`browsevm-update.timer`), not by hand. Nothing in the VM updates itself (every start
     is the base again); a new base = newest Fedora packages and both browsers
+  On the host, the window (beta, 2026-11-18): remote-viewer only through an own Wayland
+  relay (GTK 3 ends the viewer when GNOME Shell reads late) and inside a bwrap sandbox (no
+  network, no home, no session bus, no devices, only its three sockets). Cost: a Python
+  relay in the display path, user namespaces needed for the sandbox (already on), the
+  sound socket can record other programs' sound. `BROWSEVM_RELAY=0` /
+  `BROWSEVM_SANDBOX=0` turn one off per start
 
 ## Brave: RPM, not Flatpak (not CIS)
 - Brave's own RPM repo, layered (browsers/README.md). Why: Brave's own build with the

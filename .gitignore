@@ -8,3 +8,6 @@ scap-*.txt
 # hostfw: this machine's addresses (see firewall/hostfw.local.example)
 local.conf
 *.local
+
+# python bytecode (tests)
+__pycache__/

@@ -4,7 +4,8 @@ Status: step 1 (network) in `harden-workstation.sh browsevm`; step 2 (base image
 `browsevm/browsevm.sh build`; step 3 (domain, unit, polkit rule, launcher) in
 `browsevm/browsevm.sh install`; step 4 (checks) in `browsevm/browsevm.sh report` and the
 list below; updates in `browsevm/browsevm.sh update` + a daily timer. README,
-deviations, rollback, verification rows: done (2026-11-17).
+deviations, rollback, verification rows: done (2026-11-17). Viewer relay + sandbox:
+beta (2026-11-18).
 
 ## Goal
 - random links never reach the daily user's files or the system
@@ -242,16 +243,20 @@ in a terminal). Window closed = VM stopped.
   `("verb")`). No other unit, no restart / enable, no libvirt group (= root-equivalent). The user name
   comes from `DAILY_USER` at install (`/etc/browsevm/view-user`), not from the repo
 - `/usr/local/bin/browsevm [mullvad|brave]` (desktop entries `browsevm Mullvad`,
-  `browsevm Brave`): `systemctl start browsevm@<browser>`, then `remote-viewer --title
-  "browsevm <browser>" --spice-disable-usbredir spice+unix:///run/browsevm/spice.sock`,
-  then `systemctl stop` when the window closes. One window at a time (lock). A VM left
+  `browsevm Brave`): `systemctl start browsevm@<browser>`, then `/usr/bin/remote-viewer
+  --title "browsevm <browser>" --spice-disable-usbredir
+  spice+unix:///run/browsevm/spice.sock` (through the relay and the sandbox below), then
+  `systemctl stop` when the window closes. One window at a time (lock). A VM left
   running without a window (logout, crash of the viewer) is stopped first: every window
-  is a new clean VM. While the base is rebuilt (build lock taken): a note, no start
+  is a new clean VM. While the base is rebuilt (build lock taken): a note, no start.
+  Wayland only: no Wayland session = refused; the viewer gets `GDK_BACKEND=wayland` and
+  no `DISPLAY`
 - viewer crash on Wayland: GTK 3 ends a client with `_exit(1)` when its socket to GNOME
   Shell is full (`Gdk-Message: Error flushing display: Resource temporarily unavailable`,
-  Brave on a busy page, 2026-11-15; known for virt-viewer under Wayland). The launcher
-  keeps the viewer's stderr; with that line (or `dispatching to Wayland display`) and the
-  unit still active it opens the viewer again on the same VM (up to 5 times in 2 min).
+  Brave on a busy page, 2026-11-15; 6 drops in 2 min on 2026-11-18 = VM stopped). Fix:
+  the relay below. Kept as a second line: with that line (or `dispatching to Wayland
+  display`, or the relay's `queue limit`) in the viewer's stderr and the unit still
+  active, the launcher opens the viewer again on the same VM (up to 5 times in 2 min).
   Not `GDK_BACKEND=x11`: on Xwayland other X11 clients could read what is typed into the
   VM
 - install removes an old `browsevm.service` (before 2026-11-15: one browser)
@@ -259,6 +264,77 @@ in a terminal). Window closed = VM stopped.
 - links: typed in the VM. No way to hand one over from the host (no clipboard, by design)
 - GNOME asks once "Allow inhibiting shortcuts" for Remote Viewer: Allow = Alt+Tab, Super
   ... go to the VM while its window has the focus (Super+Escape gives them back)
+
+## Viewer: relay + sandbox (beta, 2026-11-18)
+What the window path carries: the VM's screen and sound to the host, keys and pointer
+into the VM. Risks, in order: (1) another host program reads the keys / the screen, (2)
+the viewer as a way in: it parses data the VM controls (pictures, cursor shapes, sound)
+and ran as the daily user (home, network, session bus), (3) the window drops (only
+availability; it fails safe: VM stopped, overlay gone). A fix for (3) may not weaken (1)
+or (2).
+
+Rejected: `GDK_BACKEND=x11` (breaks 1); bigger socket buffers for every program
+(`net.core.wmem_default`: system-wide for one program, only delays the drop); a preload
+library inside remote-viewer (compiler / binary in the repo, the window freezes
+instead); QEMU drawing the window itself (gives `svirt_t` the desktop); another viewer /
+protocol (no sound, or not packaged; same parsing risk).
+
+Relay (`browsevm/browsevm-wlrelay.py`, installed `/usr/local/lib/browsevm/`, run with
+`python3 -I`):
+- why: GTK 3 calls `_exit(1)` on any `wl_display_flush()` error, EAGAIN included
+  (`gdk/wayland/gdkeventsource.c`, still so on gtk-3-24 2026-10); a busy GNOME Shell
+  that reads late = a full socket. Firefox ships the same kind of relay (wayland-proxy,
+  Firefox 121)
+- connects to GNOME Shell first, then starts the viewer with its end of a socketpair as
+  `WAYLAND_SOCKET` (no path on disk: no other process can connect; `WAYLAND_DISPLAY` and
+  `DISPLAY` removed: the relay is the viewer's only way to the screen). No compositor =
+  the viewer is not started (no X11 fallback)
+- reads both sides at once, keeps what the other side cannot take yet; bytes and fds
+  passed on unchanged, never parsed (no new parser = almost no new attack surface); fds
+  leave with or before their bytes, at most 28 per send (libwayland `MAX_FDS_OUT`, the
+  most its receiver takes at once)
+- limits per direction: 64 MiB, 8192 waiting fds: above one the viewer is ended (exit
+  75, `browsevm-wlrelay: queue limit`) and the launcher opens it again
+- one line at the end (stderr + the launcher's journal line): largest queue, longest
+  wait per direction (= how long GNOME Shell did not read), end reason. No content
+- tested off the host (2026-11-18, a libwayland 1.22 test client + compositor; the client
+  exits like GTK 3 on a failed flush): compositor busy 3 s, 400000 requests (8000 with
+  an fd): without the relay `Error flushing display` at once; with it no drop, every fd
+  matched its request, longest wait 3.06 s. Same with the launcher + bwrap as an
+  unprivileged user. Unit tests: `tests/` (CI)
+
+Sandbox (`bwrap`, from Silverblue's base: Flatpak uses it):
+- `--unshare-all --unshare-user --disable-userns --die-with-parent --new-session
+  --clearenv`: own user / pid / ipc / uts / cgroup / network namespace (loopback only),
+  no new user namespace inside (a common kernel exploit path), no capabilities,
+  no_new_privs, no terminal to push keys into
+- files: `/usr` read-only; from `/etc` only fonts, ld.so.cache, nsswitch.conf,
+  localtime, pulse, crypto-policies, xdg, gtk-3.0 and a passwd / group with this user's
+  own line; home = empty tmpfs (gone at the end: no recent-files list of the socket);
+  `/tmp` tmpfs; `/dev` minimal (no `/dev/snd`, no `/dev/dri`: no direct sound devices,
+  no GPU driver surface); no `/sys`
+- sockets: the SPICE socket, the relay's fd, the PulseAudio socket
+  (`$XDG_RUNTIME_DIR/pulse/native`, pipewire-pulse) for sound. No session bus (no
+  systemd user manager, no Secret Service), no X11, no other runtime socket
+- env: `GDK_BACKEND=wayland`, `GSETTINGS_BACKEND=memory`, `NO_AT_BRIDGE=1`,
+  `GIO_USE_VFS=local`
+- why so little: through the SPICE socket the viewer still talks to the VM (keys,
+  pointer): a taken-over viewer could pass what it reads back into the VM, which has the
+  internet. So it gets nothing worth taking
+- user namespaces: already on (deviations: Flatpak, Podman, Brave); the launcher tests
+  the sandbox before it starts the VM and refuses if it fails
+
+Left (beta):
+- the sound socket can also record (other programs' sound: monitor sources); no
+  microphone (`mic` section). Per-client PipeWire permissions: later
+- no seccomp filter yet (Flatpak's list would be next), the viewer is still
+  `unconfined_t` (an SELinux domain for it: later)
+- the relay runs outside the sandbox (it must reach GNOME Shell); it only moves bytes
+- GNOME Shell sees the relay's pid as the client's (app found by its app id)
+
+Switches (per start, a note says when one is off): `BROWSEVM_RELAY=0` /
+`BROWSEVM_SANDBOX=0 browsevm brave`. Every end of the viewer: `journalctl -t browsevm`
+as the daily user (exit status, layers, seconds, the relay's numbers).
 
 ## SELinux (host)
 - QEMU: `svirt_t` + a random MCS pair per start (sVirt, dynamic label), seccomp sandbox
@@ -391,6 +467,7 @@ cat /var/lib/browsevm/base.info                  # date + browser versions of th
 - QEMU / KVM escape + SELinux bypass; CPU side channels
 - what is typed in the VM browser is seen there: no logins to real accounts
 - a needed file has no way out (by design)
+- the viewer (beta layers): see "Viewer: relay + sandbox" (sound socket, no seccomp yet)
 
 ## Steps
 1. network: `browse`, firewalld zone + policies, hostfw `if_vm_iso`, kvmlan (done)
@@ -402,3 +479,4 @@ cat /var/lib/browsevm/base.info                  # date + browser versions of th
 5. Brave as the second browser, `update` + daily timer (2026-11-15)
 6. README, deviations, rollback, verification rows; kiosk as `user_u`; DNS to its own
    bridge only (2026-11-17)
+7. viewer: Wayland relay + bwrap sandbox, beta (2026-11-18)

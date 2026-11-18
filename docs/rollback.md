@@ -55,6 +55,8 @@ sudo sed -i 's/^AutomaticUpdatePolicy=.*/AutomaticUpdatePolicy=none/' /etc/rpm-o
 sudo rpm-ostree cleanup -p                       # drop a staged (not yet booted) update
 sudo systemctl disable --now flatpak-update-system.timer && sudo systemctl --global disable flatpak-update-user.timer
 sudo systemctl disable --now browsevm-update.timer   # browsevm: no daily base rebuild
+BROWSEVM_RELAY=0 BROWSEVM_SANDBOX=0 browsevm brave   # browsevm viewer, beta layers off for one start
+git revert <viewer commit> && sudo DAILY_USER=<daily> browsevm/browsevm.sh install   # ... for good (VM off)
 sudo setsebool -P virt_use_usb on virt_use_nfs on   # svirt: Fedora's defaults
 sudo sed -i 's/^security_require_confined = 1/#security_require_confined = 1/' /etc/libvirt/qemu.conf && sudo systemctl restart virtqemud
 sudo systemctl disable --now fwupd-refresh.timer     # no firmware metadata at all

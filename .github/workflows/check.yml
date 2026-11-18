@@ -22,3 +22,7 @@ jobs:
         run: |
           shellcheck --version | head -2
           tools/lint.sh
+
+      # browsevm viewer relay (beta): bytes / fds in order, busy compositor, limits
+      - name: tests (python3 -m unittest)
+        run: python3 -I -B -m unittest discover -s tests -v

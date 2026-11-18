@@ -38,9 +38,9 @@
 # browsevm-ctl (root, run by browsevm@<browser>.service only), browsevm@.service (never
 # enabled), a polkit rule (DAILY_USER may start / stop browsevm@mullvad / @brave, nothing
 # else), /usr/local/bin/browsevm (start + remote-viewer + stop when the window closes)
-# and its two desktop entries, a root-owned copy of this script + the kickstart in
-# $LIB and browsevm-update.timer (enabled). The daily user gets no libvirt access. Run
-# again after a change here; the VM must be off.
+# and its two desktop entries, the viewer's Wayland relay (beta) and a root-owned copy of
+# this script + the kickstart in $LIB, browsevm-update.timer (enabled). The daily user
+# gets no libvirt access. Run again after a change here; the VM must be off.
 #
 # report: nobody can log in to the VM (no shell, no ssh, no agent). The image has a small
 # unit that writes the kiosk's state (cage, the browser, its security level, the script
@@ -69,7 +69,7 @@ MIN_KBPS="${BROWSEVM_MIN_KBPS:-200}"
 MULLVAD_REPO=https://repository.mullvad.net/rpm/stable/mullvad.repo   # same URL in browsevm.ks
 BRAVE_REPO=https://brave-browser-rpm-release.s3.brave.com/brave-browser.repo   # same URL in browsevm.ks
 BUILD_LOCK=/run/browsevm-build.lock   # held by build; browsevm-ctl / the launcher wait for it
-LIB=/usr/local/lib/browsevm           # root-owned copy run by browsevm-update.service
+LIB=/usr/local/lib/browsevm           # root-owned: copy run by browsevm-update.service, viewer relay
 INFO=/var/lib/browsevm/base.info      # date + browser versions of the last good build
 IMGDIR=/var/lib/libvirt/images        # base image, kept netinst ISO
 UNITS=(browsevm@mullvad.service browsevm@brave.service)
@@ -348,7 +348,8 @@ cmd_install() {
     command -v "$f" >/dev/null || die "$f missing"
   done
   for f in domain.xml browsevm-ctl.sh browsevm-view.sh browsevm@.service 60-browsevm.rules browsevm.desktop \
-           browsevm-brave.desktop browsevm-update.service browsevm-update.timer browsevm.ks browsevm.sh; do
+           browsevm-brave.desktop browsevm-update.service browsevm-update.timer browsevm.ks browsevm.sh \
+           browsevm-wlrelay.py; do
     [[ -f $HERE/$f ]] || die "$HERE/$f missing: run from the repo"
   done
   "${V[@]}" net-info "$NET" >/dev/null 2>&1 || die "network $NET missing: sudo ./harden-workstation.sh browsevm"
@@ -390,6 +391,8 @@ cmd_install() {
   install -d -m 0755 "$LIB"
   put 0755 "$HERE/browsevm.sh" "$LIB/browsevm.sh"
   put 0644 "$HERE/browsevm.ks" "$LIB/browsevm.ks"
+  # the launcher runs it with python3 -I (beta: BROWSEVM_RELAY=0 starts without it)
+  put 0644 "$HERE/browsevm-wlrelay.py" "$LIB/browsevm-wlrelay.py"
   put 0644 "$HERE/browsevm-update.service" /etc/systemd/system/browsevm-update.service
   put 0644 "$HERE/browsevm-update.timer" /etc/systemd/system/browsevm-update.timer
   systemctl daemon-reload
@@ -399,8 +402,10 @@ cmd_install() {
     warn "could not enable browsevm-update.timer"
   fi
 
-  command -v remote-viewer >/dev/null ||
+  [[ -x /usr/bin/remote-viewer ]] ||
     warn "remote-viewer missing: sudo rpm-ostree install virt-viewer, reboot"
+  [[ -x /usr/bin/bwrap ]] ||
+    warn "bwrap missing: the viewer's sandbox (beta) cannot start; BROWSEVM_SANDBOX=0 browsevm ... starts without it"
   ok "$user: open 'browsevm Mullvad' or 'browsevm Brave' from the app grid (or run: browsevm [mullvad|brave]); closing the window stops the VM"
 }
 

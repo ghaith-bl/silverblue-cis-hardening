@@ -72,8 +72,8 @@ hardening() {
   # the kickstart's %post runs in the installer: a syntax error there spoils a 10 min build
   sed -n '/^%post/,/^%end/p' browsevm/browsevm.ks | sed '1d;$d' | bash -n || rc=1
   if ((rc)); then bad "bash -n"; else pass "bash -n"; fi
-  if python3 -I -c 'import ast, sys; ast.parse(open(sys.argv[1]).read(), sys.argv[1])' \
-       firewall/hostfw-noscope.py; then pass python; else bad python; fi
+  if python3 -I -c 'import ast, sys; [ast.parse(open(f).read(), f) for f in sys.argv[1:]]' \
+       firewall/hostfw-noscope.py browsevm/browsevm-wlrelay.py tests/*.py; then pass python; else bad python; fi
   if ! have_sc; then sc
   elif sc -S warning "${sh[@]}" firewall/nm-dispatcher/90-hostfw-sync; then pass shellcheck
   else bad shellcheck; fi
