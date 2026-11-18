@@ -5,27 +5,32 @@ technical reference is at the end.
 
 ## Why I do this
 
-**Privacy.** More and more people care about privacy, and at the same time it is being
-taken away: our data is sold to big tech. Big companies do not like the idea of privacy.
-They talk about it in general words, but their terms and policies, sadly, say something
-else. For me, privacy is a right, not a crime, in a world full of companies that sell
-our data, track us and fill our screens with ads. Today I, like everyone, spend a big
-part of my time on my phone and my computer. That time is our life, and our life is
-being sold without our consent. It is a complicated subject, but it is clearly worth
-caring about our privacy as humans.
+Privacy. More and more people care about privacy, and at the same time it is
+being taken away. Our data is collected, sold and used to track us. Many
+companies speak well of privacy in general words, but their terms and policies
+often say something else. For me, privacy is a human right, not a crime, and
+not something I have to explain. Today I, like everyone, spend a big part of my
+day on my phone and my computer. That time is our life, and our life is being
+sold without our consent. It is a complicated subject, but it is clearly worth
+protecting, as humans. So I want my machine to give away as little as
+possible, and my activity to be hard to link to me, not only hard to break
+into.
 
-**Security.** I love this field, Linux and open source: so many choices, and the freedom
-to change them, to expect malware and to protect against it. With AI there are more
-vulnerabilities than before, so security has to be taken seriously: security updates,
-and good habits that make risks less likely. With the help of AI I also look for ways to
-harden my system and to keep developing it, at the level of the kernel, the firewall, the
-browser and even the services.
+Security. I love this field, Linux and open source: so many choices, and the
+freedom to read, change and understand every part. I like to think like an
+attacker, so I can close the door before malware comes. With AI, weaknesses
+are found and used faster than before, so security has to be taken seriously:
+fast security updates, layers of defense, and good habits that make risks
+smaller. I also use AI as a study partner: it helps me find and test ways to
+harden my system, at the level of the kernel, the firewall, the browser and the
+services. I check every idea myself before it runs on my machine.
 
-**So this project is personal.** It is not a commercial product and not an imaginary idea.
-It is my method, and the things I learn every day. It is the place where I show my ideas
-with a security mindset: strict controls, inside a strict method. The method is public;
-my private data is not. It is never finished: I keep studying, testing and adding, and
-this page changes with it.
+So this project is personal. It is not a commercial product and not a theory.
+It is my method, and the things I learn every day. It is where I show how I
+think about security: clear rules, tested controls, and a strict method. I
+would rather write what my setup cannot do than claim more than I have tested.
+The method is public; my private data is not. It is never finished: I keep
+studying, testing and adding, and this page changes with it.
 
 ## My rules
 - private by default: nothing leaves the machine unless I decided it
