@@ -1,11 +1,66 @@
 # Threat model
 
-What this is: privacy and security hardening of one Fedora Silverblue laptop, kept in
-public as a documented method. The method is public, the private data is not. It is
-never finished: protections are studied, tested and added all the time, and this model
-changes with them.
+Why I harden my laptop, how I think about it, and what it can and cannot stop. The
+technical reference is at the end.
 
-In short, what is in place (host measured 2026-11-18):
+## Why I do this
+
+**Privacy.** More and more people care about privacy, and at the same time it is being
+taken away: our data is sold to big tech. Big companies do not like the idea of privacy.
+They talk about it in general words, but their terms and policies, sadly, say something
+else. For me, privacy is a right, not a crime, in a world full of companies that sell
+our data, track us and fill our screens with ads. Today I, like everyone, spend a big
+part of my time on my phone and my computer. That time is our life, and our life is
+being sold without our consent. It is a complicated subject, but it is clearly worth
+caring about our privacy as humans.
+
+**Security.** I love this field, Linux and open source: so many choices, and the freedom
+to change them, to expect malware and to protect against it. With AI there are more
+vulnerabilities than before, so security has to be taken seriously: security updates,
+and good habits that make risks less likely. With the help of AI I also look for ways to
+harden my system and to keep developing it, at the level of the kernel, the firewall, the
+browser and even the services.
+
+**So this project is personal.** It is not a commercial product and not an imaginary idea.
+It is my method, and the things I learn every day. It is the place where I show my ideas
+with a security mindset: strict controls, inside a strict method. The method is public;
+my private data is not. It is never finished: I keep studying, testing and adding, and
+this page changes with it.
+
+## My rules
+- private by default: nothing leaves the machine unless I decided it
+- least privilege: my daily account has no admin rights; programs get only what they need
+- layers: no single control is trusted alone (three firewalls, not one)
+- standards as the measure: CIS Benchmark, KSPP, DISA STIG, NIST; every deviation has a
+  written reason ([deviations.md](deviations.md))
+- measure, do not believe: a setting counts when a test shows it
+  ([verification.md](verification.md))
+- every change has a way back ([rollback.md](rollback.md))
+- say the limits: what this cannot stop is written below
+
+## A normal day
+- **I turn the laptop on.** The firmware asks for its password, Secure Boot checks the
+  boot loader and the kernel, I type the disk passphrase. Stolen while off, the disk is
+  only noise.
+- **I log in.** My daily account has no admin rights. The admin account exists only on
+  a text console; I never type its password in the desktop.
+- **I join a cafe Wi-Fi.** The laptop shows a new random MAC and no real name. Nothing
+  goes out except the VPN tunnel, DNS too; the cafe network cannot reach the laptop. A
+  network I have never used still needs a manual step from me (IPv6 off, its DNS
+  ignored); making it automatic is planned.
+- **I browse.** My browsers are hardened, with separate profiles for separate uses.
+  A link I do not trust opens in a throwaway VM that is gone when I close it.
+- **A program goes bad.** It cannot read or change other programs' memory, cannot use
+  sudo or su, and the firewall sees which program unit sends what.
+  The kernel is hardened to make the step to root harder.
+- **I plug in a USB stick I do not know.** It is blocked until I allow it as admin.
+- **Updates.** System updates are prepared every day and used at the next reboot; apps
+  every day; the browsing VM is rebuilt every week.
+- **I walk away.** The screen locks after 15 minutes idle; new USB devices stay blocked.
+- **I check.** sectop shows what goes out and what tries to come in; audit rules record
+  sensitive changes.
+
+## What is in place (host measured 2026-11-18)
 - three firewall layers: firewalld (inbound: zone `drop`), Mullvad lockdown (nothing
   outside the VPN tunnel, also while disconnected), hostfw from this repo (outbound by
   destination, port and program scope; the LAN blocked; every leak logged)
@@ -24,103 +79,100 @@ In short, what is in place (host measured 2026-11-18):
   machine, DNS only through the tunnel, no LLMNR / mDNS
 - detection: auditd (73 rules, locked until reboot), journald, sectop (live view)
 
-This file: for whom, what it protects, against which capabilities, what it cannot do.
-Every choice: [deviations.md](deviations.md); tests: [verification.md](verification.md).
+## Reference
 
-## For whom
-- one owner, one daily-driver laptop (Fedora Silverblue 44), two accounts: a daily GUI
-  user without sudo, an admin used only on a text console
+### For whom
+- me: one daily-driver laptop (Fedora Silverblue 44), two accounts (daily GUI user without
+  sudo, admin only on a text console)
 - networks: home and public / foreign Wi-Fi; all traffic through a VPN
-- this repo: a documented personal setup and a portfolio. Not a product for other people
+- this repo: my documented method and portfolio. Not a product for other people
 
-## Goals (all top priority)
-- G1 privacy and anonymity: as few identifiers as possible; activities hard to link by
-  networks, ISPs, sites, trackers, data brokers and service providers. Privacy is a right,
-  not something to justify
+### Goals (all top priority)
+- G1 privacy and anonymity: as few identifiers as possible; my activity hard to link by
+  networks, ISPs, sites, trackers, data brokers and service providers
 - G2 security: a smaller attack surface, a hardened kernel and exploit mitigations, so a
-  vulnerability is harder to exploit and does less harm. Recognized standards as the
-  measure: CIS Benchmark (OpenSCAP), KSPP, DISA STIG RHEL 9, NIST SP 800-53 / 800-63B,
-  CIS Controls v8.1. Every deviation has a reason
+  vulnerability is harder to exploit and does less harm. Measured against CIS Benchmark
+  (OpenSCAP), KSPP, DISA STIG RHEL 9, NIST SP 800-53 / 800-63B, CIS Controls v8.1
 - G3 verifiable: measured (OpenSCAP, sectop, before / after on the host), documented,
-  reversible ([rollback.md](rollback.md))
+  reversible
 
-## Assets
+### What I protect
 | Asset | Main controls |
 |-------|---------------|
 | data on the disk | LUKS2 (aes-xts-plain64, 512-bit key), Secure Boot, lockdown |
-| the LUKS passphrase | memorized; argon2id (t=8, 1 GiB, 4 threads); typed only at boot |
-| the admin password | root locked; admin only on the text console, never typed in GNOME |
+| the disk passphrase | memorized; argon2id (t=8, 1 GiB, 4 threads); typed only at boot |
+| the admin password | root locked; admin only on the text console, never typed in the desktop |
 | browser sessions, cookies, saved logins | profiles per use, hardened policies; random links only in browsevm |
-| network identity: real IP, DNS queries, VPN account and keys | VPN lockdown mode + hostfw, DNS only in the tunnel, management socket for one group |
+| network identity: real IP, DNS queries, VPN account and keys | VPN lockdown mode + hostfw, DNS only in the tunnel, VPN control for one group only |
 | identifiers: MAC, hostname, DHCP ids, IPv6 addresses, browser fingerprint | netprivacy (random MAC, generic hostname, ids from the random MAC), IPv6 off on Wi-Fi profiles, Mullvad Browser / Tor Browser |
 | GitHub / SSH keys | in the daily home (0700) |
-| logs (journal, audit) | detection, and at the same time a record of activity (G1 cost) |
+| logs (journal, audit) | detection, and at the same time a record of my activity (a G1 cost) |
 
-## Adversaries (capabilities, not names)
+### Who I protect it from (capabilities, not names)
 | # | Capability | Covered |
 |---|------------|---------|
 | A1 | web content: trackers, fingerprinting, browser exploits | yes: browser hardening, browsevm for unknown links |
-| A2 | malware in the daily session, no root | yes: no sudo, ptrace off, firewall per app scope, kernel hardening against the step to root |
+| A2 | malware in my daily session, no root | yes: no sudo, ptrace off, firewall per program scope, kernel hardening against the step to root |
 | A3 | the local network: public Wi-Fi, router, other devices | yes: inbound drop, no LAN traffic outside the tunnel, no LLMNR / mDNS / hostname |
 | A4 | network observers (ISP, upstream): metadata, DNS, time | partly: they see an encrypted tunnel to the VPN, its size and timing |
-| A5 | service providers, data brokers: linking identities | partly: separate profiles, fingerprint-resistant browsers; logins link sessions whatever the network does |
+| A5 | service providers, data brokers: linking identities | partly: separate profiles, fingerprint-resistant browsers; a login links sessions whatever the network does |
 | A6 | a thief, laptop powered off | yes: full-disk encryption, strong passphrase parameters |
-| A7 | repeated physical access (evil maid) | partly: GRUB password, USBGuard, IOMMU; the initramfs is not signed (accepted risks) |
+| A7 | repeated physical access (evil maid) | partly: firmware and GRUB passwords, USBGuard, IOMMU; the initramfs is not signed (risks below) |
 | A8 | an attacker with root | detection only, best effort: logs live on the same disk, root can delete them |
 
-Beyond what any workstation config can stop (said as a limit of the tool, not about
+Beyond what any workstation config can stop (a limit of the tool, not a statement about
 anyone): hardware / firmware implants, an exploit chain made for this one machine,
-compulsion of the owner or of a provider, an observer who sees both ends of every
-connection. Tor, Qubes and Tails list the same kind of limits.
+compulsion of me or of a provider, an observer who sees both ends of every connection.
+Tor, Qubes and Tails list the same kind of limits.
 
-## Section -> adversary
+### Which part does what
 | Section(s) | Against |
 |------------|---------|
 | sysctl, modules, guesttools, kargs, autoupdate | A2: the step from a user to the kernel / root (kargs `iommu`: A7 DMA devices; `rd.shell=0`: a person at the console) |
 | coredump | secrets in crash dumps (A2, A8) |
-| journald, auditd, audit-rules (+ sectop) | detection (A8); retention is a G1 cost |
+| journald, auditd, audit-rules (+ sectop) | detection (A8); keeping logs is a G1 cost |
 | gnome | a person at an unlocked laptop; media that start by themselves |
 | sudo, su, pam, accounts | A2 reaching the admin / root; guessing at the lock screen |
 | pwage | compliance only: no direct adversary |
-| services, sshd, loopback, hostfw (firewall/) | A3; exfiltration by A2; leaks outside the tunnel |
+| services, sshd, loopback, hostfw (firewall/) | A3; data sent out by A2; leaks outside the tunnel |
 | cron, perms | persistence; reading other config |
 | mic, netprivacy, browsers/ | A2 listening; A1 / A3 / A5 tracking (MAC, hostname, DHCP ids) |
 | mullvad, time | A4; a local user changing the VPN; clock attacks on certificates |
 | kvmlan | none by itself: lets VMs work with the LAN blocked |
 | browsevm, svirt | A1 contained in a VM; a VM escape lands confined |
 | usbguard | BadUSB; A7 while locked |
-| appunit | firewall attribution (apps hidden in GNOME Shell's cgroup) |
+| appunit | firewall attribution (programs hidden in GNOME Shell's cgroup) |
 
-## Anonymity: layers and limits
-- network: VPN (sites do not see the real IP, the ISP does not see the destinations), DNS
-  only through the tunnel, a random MAC per network, no hostname or stable DHCP ids,
-  IPv6 off on Wi-Fi profiles, NTS time through the tunnel
+### Where anonymity ends
+- network: VPN (sites do not see my real IP, the ISP does not see where I go), DNS only
+  through the tunnel, a random MAC per network, no hostname or stable DHCP ids, IPv6 off
+  on Wi-Fi profiles, NTS time through the tunnel
 - browser: fingerprint resistance (Mullvad Browser, Tor Browser), separate profiles per
   identity, browsevm for unknown links
 - device: microphone off (WirePlumber), no camera, location service masked
 - account / behavior: an anonymous VPN account; logging in to an account links sessions
-  whatever the network does (a practice of the user, not something a config can enforce)
+  whatever the network does (my practice, not something a config can enforce)
 - limits: a VPN moves trust to the provider (pseudonymity, not anonymity); the strongest
   unlinkability here is Tor Browser; browsevm uses the host's VPN exit unless the Mullvad
-  extension's proxy is on; an observer of both ends of a connection can correlate timing (Tor's own design papers
-  say Tor does not defend against this)
+  extension's proxy is on; an observer of both ends of a connection can correlate timing
+  (Tor's own design papers say Tor does not defend against this)
 
-## Accepted risks (state 2026-11-18)
+### Risks I accept, and why (state 2026-11-18)
 - root: detection, not prevention. `kernel.yama.ptrace_scope = 3` closes the easiest way
   into another program's memory and makes the rest harder; root still has others (run as
   the user and ask its Secret Service over D-Bus, eBPF, uprobes, change the sysctl file
   and reboot). Logs are on the same disk (`-e 2` locks the rules, not the files)
 - boot chain: Secure Boot checks shim, GRUB and the kernel, not the initramfs; `/boot` is
   not encrypted. With repeated access someone can change the initramfs or the boot
-  entries and record the LUKS passphrase. The GRUB password protects the menu only.
+  entries and record the disk passphrase. The GRUB password protects the menu only.
   The initramfs cannot be encrypted: it is the program that asks for the passphrase and
   runs before the disk is open. The fix is to verify it: a signed unified kernel image
   (kernel + initramfs + command line in one signed file). Fedora 44 has sealed Atomic
   Desktop images built that way as tests (systemd-boot, UKI, composefs with fs-verity),
-  not official yet: watch, try in a VM. Until then: the laptop is not left alone in
-  untrusted places; a TOTP check of the boot state (tpm2-totp) in a lab
-- LUKS `allow-discards` (decision 2026-11-18: kept): TRIM keeps the SSD fast and long-lived;
-  a thief can see which blocks are free, not their content or any key
+  not official yet: I watch it and will try it in a VM. Until then: I do not leave the
+  laptop alone in untrusted places; a TOTP check of the boot state (tpm2-totp) in a lab
+- LUKS `allow-discards` (decision 2026-11-18: kept): TRIM keeps the SSD fast and
+  long-lived; a thief can see which blocks are free, not their content or any key
 - user namespaces stay on: Flatpak, rootless Podman, Brave's sandbox, glycin, bwrap
   (browsevm viewer) need them
 - IPv6: hostfw lets only neighbor discovery / MLD out to the LAN (fc00::/7, fe80::/10,
@@ -136,22 +188,22 @@ connection. Tor, Qubes and Tails list the same kind of limits.
 - Thunderbolt: security level `user`, DMA protection by the IOMMU on (measured
   `iommu_dma_protection` 1); a new device needs approval
 - journal: persistent; only journald's default size cap (10 % of the filesystem, at most
-  4 GiB): 2.9 GB, history since 2026-07 (measured 2026-11-18). A time limit: decided in
-  the journald step
+  4 GiB): 2.9 GB, history since 2026-07 (measured 2026-11-18). Decided: one month,
+  applied in the journald step
 - browsevm viewer (beta): the sound socket it needs for the VM's sound would also let a
   taken-over viewer listen to what other programs play (not the microphone: off); no
   system-call filter (seccomp) yet
 
-## Assumptions
-- the owner keeps physical control most of the time
+### What I assume
+- I keep physical control of the laptop most of the time
 - the software sources are trusted: Fedora signing (ostree), Mullvad, Brave, Flathub, the
   Tor Project (supply chain)
 - the firmware is trusted (UEFI, embedded controller, Wi-Fi / SSD firmware)
 
-## Not goals
-- compliance certification: CIS is the measuring tool, not the target
-- hiding that a VPN or Tor is used: the ISP sees an encrypted tunnel
+### What this is not
+- a compliance certificate: CIS is the measuring tool, not the target
+- a way to hide that a VPN or Tor is used: the ISP sees an encrypted tunnel
 - anti-forensics after a forced unlock
-- a map for an attacker: the method is public, the private data is not. No account
+- a map for an attacker: the method is public, my private data is not. No account
   names, addresses, network names, device ids or raw scan reports in this repo
-- a final state: the work goes on (new protections studied, tested, added)
+- finished: the work goes on (new protections studied, tested, added)

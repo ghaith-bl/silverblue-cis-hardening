@@ -1,19 +1,20 @@
-# silverblue-cis-hardening
+# silverblue-privacy-hardening
 
-CIS Fedora Benchmark **Level 2 - Workstation** hardening for a daily-driver Fedora
-Silverblue 44 laptop that also runs KVM/libvirt, rootless Podman (kind), Steam (Flatpak)
-and Mullvad VPN (WireGuard, lockdown mode).
+Privacy and security hardening for a Fedora Silverblue workstation. CIS-aligned,
+measured with OpenSCAP, every deviation documented. My daily-driver laptop (Silverblue
+44) that also runs KVM/libvirt, rootless Podman (kind), Steam (Flatpak) and Mullvad VPN
+(WireGuard, lockdown mode).
 
-Goal: as much of CIS L2 as possible **without breaking** the tools I use every day, every
-deviation documented with a reason.
+Goal: privacy, anonymity and security **without breaking** the tools I use every day.
+The CIS Benchmark is the measure, not the target: scap-security-guide, Fedora profile
+`cis_workstation_l2` (a DRAFT, based on the CIS Fedora 40 community benchmark). Every
+deviation has a written reason. Why I do this, what it protects and its limits:
+[docs/THREAT_MODEL.md](docs/THREAT_MODEL.md).
 
 > **This is my own laptop's config, not a product.** Tested only on the machine below.
 > Read the script and the Decisions block before you run anything: some sections lock
 > you out if they do not fit your setup (PAM, su, sudo, kernel args). No warranty
 > (GPL-3.0, sections 15-16).
-
-Threat model (for whom, goals, adversaries, accepted risks, limits):
-[docs/THREAT_MODEL.md](docs/THREAT_MODEL.md).
 
 Watched live by [sectop](https://github.com/ghaith-bl/sectop): a terminal dashboard
 whose default posture checks and watch list are this repo's baseline.
@@ -37,7 +38,6 @@ checked by hand:
 | 8  | backlog: AIDE (4), CIS crypto-policy module, umask (3) | - |
 | 4  | rootless container storage in the daily user's home (kind lab): subuid owners, the container's own modes | [docs/deviations.md](docs/deviations.md) |
 
-The profile is a DRAFT in scap-security-guide (based on the CIS Fedora 40 benchmark).
 Reports stay on the host, never in git (`.gitignore`: `scap-*`).
 
 ## Environment
