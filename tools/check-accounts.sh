@@ -166,7 +166,10 @@ main() {
     line=$(grep -F " : $DAILY : " /var/log/sudo.log | grep -iE 'not in sudoers|not allowed' | tail -n 1)
     out INFO "sudo.log daily" "${line:-no refused attempt logged yet}"
   fi
-  out INFO "expiry $ADMIN" "$(chage -l "$ADMIN" | awk -F': ' '/^Maximum/ {print "max days " $2}')"
+  for u in "$ADMIN" "$DAILY"; do
+    out INFO "aging $u" "$(LC_ALL=C chage -l "$u" | awk -F': ' '/^Minimum/ {m = $2} /^Maximum/ {x = $2}
+      END {print "min days " m ", max days " x}')"
+  done
 
   printf '\n%s FAIL\n' "$fails"
   return $(( fails > 0 ))

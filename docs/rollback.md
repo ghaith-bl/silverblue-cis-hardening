@@ -6,6 +6,7 @@ Undo per section. Run from the admin (two accounts) or a root shell.
 ls /var/backups/hardening/                       # restore files from here
 sudo authselect disable-feature with-faillock    # PAM lockout off
 faillock --user "$USER" --reset                  # from a root shell, if locked
+sudo sed -i 's/^minlen = .*/minlen = 14/' /etc/security/pwquality.conf   # pam: CIS length (new passwords)
 sudo systemctl unmask <unit>                     # bring a service back
 sudo rpm-ostree override reset open-vm-tools-desktop open-vm-tools spice-vdagent   # guesttools: back at the
                                                  # next boot; then audit-rules, reboot (setuid rule back)
@@ -49,6 +50,7 @@ sudo rm /etc/systemd/journald.conf                # main file: only if the secti
 sudo systemctl restart systemd-journald
 sudo rm /etc/tmpfiles.d/90-cis-grub.conf          # GRUB file modes no longer set at boot
 sudo chage -M 99999 <user>                        # pwage: no expiry (login.defs: backup)
+sudo chage -m 0 <user>                            # pwage: no min age (or PASS_MIN_DAYS=0, section again)
 sudo cp /var/backups/hardening/<time>/etc/chrony.conf /etc/ && sudo systemctl restart chronyd
 sudo systemctl disable --now rpm-ostreed-automatic.timer   # autoupdate: OS updates by hand again
 sudo sed -i 's/^AutomaticUpdatePolicy=.*/AutomaticUpdatePolicy=none/' /etc/rpm-ostreed.conf && sudo rpm-ostree reload

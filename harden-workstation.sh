@@ -17,7 +17,7 @@
 #   - XWayland disabled         -> Steam client and most games run on X11
 #   - ip_forward = 0 / remove dnsmasq -> libvirt NAT network for KVM, rootful podman
 #   - rp_filter = 1 (strict)    -> can drop WireGuard VPN traffic (using 2)
-#   - forced password expiry    -> NIST SP 800-63B advises against it
+#   - lock after password expiry -> root is locked: an expired admin = no sudo at all
 #   - auditd HALT               -> a full disk would halt the laptop
 #   - auditd KEEP_LOGS          -> no limit, /var also holds /var/home (ROTATE, 40 x 32 MiB)
 # =============================================================================
@@ -41,6 +41,8 @@ MIC_DISABLE="internal"       # "internal" = laptop mic + 3.5mm jack mic off (USB
                              # "all" = every mic off | "no" = leave microphones alone
 IDLE_LOCK_SECONDS=900        # screen locks after 15 minutes idle
 PASS_MAX_DAYS=365            # pwage section: password max age (days) for new and existing accounts
+PASS_MIN_DAYS=1              # pwage section: min days between changes (pwhistory counts: no 24
+                             # changes in a row back to the old password); 0 = none
 PASS_WARN_AGE=14             # pwage section: warning this many days before
 MAC_MODE="random"            # "random" = new MAC on every connect (Wi-Fi + cable)
                              # "stable-ssid" = same random MAC per Wi-Fi network (Fedora default)
@@ -397,10 +399,11 @@ sec_pam() {
   set_kv /etc/security/pwhistory.conf remember 24
   log "faillock: 5 failures -> locked 15 min | pwhistory: last 24 passwords"
 
-  # Written to the main pwquality.conf (the scanner only checks that file).
+  # Written to the main pwquality.conf (the scanner only checks that file). minlen 15: NIST
+  # SP 800-63B-4 minimum for a password used alone (CIS: 14); minclass 4: CIS (deviations.md)
   local pq=/etc/security/pwquality.conf kv
   backup "$pq"
-  for kv in minlen=14 minclass=4 difok=2 maxrepeat=3 maxsequence=3 dictcheck=1; do
+  for kv in minlen=15 minclass=4 difok=2 maxrepeat=3 maxsequence=3 dictcheck=1; do
     set_kv "$pq" "${kv%%=*}" "${kv#*=}"
   done
   grep -qx 'enforce_for_root' "$pq" || echo 'enforce_for_root' >> "$pq"
@@ -408,25 +411,31 @@ sec_pam() {
     backup /etc/security/pwquality.conf.d/90-cis.conf
     rm -f /etc/security/pwquality.conf.d/90-cis.conf
   fi
-  log "pwquality: min 14 chars, 4 character classes"
+  log "pwquality: min 15 chars, 4 character classes, dictionary check"
 }
 
 ## CIS: password aging. login.defs (new accounts) + chage on every login account (uid >= 1000
-## with a usable password). No INACTIVE lock: root is locked, an expired + locked admin =
-## no sudo. No min age. An account whose password is already older than the max is skipped
-## (it would expire at once): change that password first, then run the section again.
+## with a usable password): max age, warning, min age (pwhistory counts; root can still
+## change any password the same day: sudo passwd <user>). No INACTIVE lock: root is locked,
+## an expired + locked admin = no sudo. An account whose password would expire within the
+## warning days is skipped: change that password first, then run the section again.
 sec_pwage() {
   local defs=/etc/login.defs u uid shell hash last today kv
+  for kv in "$PASS_MAX_DAYS" "$PASS_MIN_DAYS" "$PASS_WARN_AGE"; do
+    [[ $kv =~ ^(0|[1-9][0-9]{0,4})$ ]] || die "PASS_MAX_DAYS, PASS_MIN_DAYS, PASS_WARN_AGE: whole numbers"
+  done
+  (( PASS_MIN_DAYS < PASS_MAX_DAYS - PASS_WARN_AGE )) ||
+    die "PASS_MIN_DAYS must be below PASS_MAX_DAYS - PASS_WARN_AGE"
   today=$(( $(date +%s) / 86400 ))
   backup "$defs"
-  for kv in "PASS_MAX_DAYS $PASS_MAX_DAYS" "PASS_WARN_AGE $PASS_WARN_AGE"; do
+  for kv in "PASS_MAX_DAYS $PASS_MAX_DAYS" "PASS_MIN_DAYS $PASS_MIN_DAYS" "PASS_WARN_AGE $PASS_WARN_AGE"; do
     if grep -Eq "^[[:space:]]*${kv%% *}[[:space:]]" "$defs"; then      # set lines, not comments
       sed -i -E "s/^[[:space:]]*${kv%% *}[[:space:]].*/${kv%% *}\t${kv#* }/" "$defs"
     else
       printf '%s\t%s\n' "${kv%% *}" "${kv#* }" >> "$defs"
     fi
   done
-  log "login.defs: PASS_MAX_DAYS $PASS_MAX_DAYS, PASS_WARN_AGE $PASS_WARN_AGE"
+  log "login.defs: PASS_MAX_DAYS $PASS_MAX_DAYS, PASS_MIN_DAYS $PASS_MIN_DAYS, PASS_WARN_AGE $PASS_WARN_AGE"
   while IFS=: read -r u _ uid _ _ _ shell; do
     (( uid >= 1000 && uid < 60000 )) || continue
     [[ $shell == */nologin || $shell == */false ]] && continue
@@ -437,8 +446,8 @@ sec_pwage() {
       warn "$u: password last changed $last - change it first, skipped"
       continue
     fi
-    chage -M "$PASS_MAX_DAYS" -W "$PASS_WARN_AGE" "$u" &&
-      log "$u: max $PASS_MAX_DAYS days, warning $PASS_WARN_AGE (changed $(( today - last )) days ago)"
+    chage -M "$PASS_MAX_DAYS" -m "$PASS_MIN_DAYS" -W "$PASS_WARN_AGE" "$u" &&
+      log "$u: max $PASS_MAX_DAYS days, min $PASS_MIN_DAYS, warning $PASS_WARN_AGE (changed $(( today - last )) days ago)"
   done < <(getent passwd)
 }
 

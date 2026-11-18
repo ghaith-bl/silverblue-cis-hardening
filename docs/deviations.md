@@ -19,7 +19,6 @@ Input for an OpenSCAP tailoring file.
 
 | Rule | Decision | Reason |
 |------|----------|--------|
-| `accounts_minimum_age_login_defs`, `accounts_password_set_min_life_existing` | skip | NIST SP 800-63B advises against forced periodic password changes (max age: Two accounts) |
 | `accounts_tmout` | skip | GNOME idle lock (15 min, locked) covers it |
 | `banner_etc_issue_cis`, `banner_etc_issue_net_cis`, `dconf_gnome_banner_enabled`, `dconf_gnome_login_banner_text`, `sshd_enable_warning_banner_net` | skip | legal banners - value in organisations, not on a personal device |
 | `package_systemd-journal-remote_installed` | skip | needs a log server on a second device; none now |
@@ -31,9 +30,21 @@ Input for an OpenSCAP tailoring file.
 
 | Rule | Decision | Reason |
 |------|----------|--------|
-| `accounts_maximum_age_login_defs`, `accounts_password_set_max_life_existing` | applied: 365 days, warning 14 (`pwage`) | I change both passwords about every six months anyway; the max only catches a forgotten change. NIST SP 800-63B still holds: change at once on any sign of compromise |
 | `account_disable_post_pw_expiration` | skip | locks an account some days after its password expired: root is locked and the admin is the only sudo account, so an expired admin would mean no sudo at all (recovery from a live USB) |
 | admin password | memorized + offline copy (paper / phone password manager), never in storage the daily user opens, never typed in GNOME | a keylogger or a password manager in the daily session must not get it |
+
+## Passwords: CIS on purpose (decision 2026-11-17)
+
+NIST SP 800-63B-4: no periodic change, no composition rules, 15 chars for a password used
+alone. This repo follows CIS on purpose (the benchmark is the measure). On any sign of
+compromise: change the password at once (`sudo passwd <user>` works the same day too).
+
+| Rule | Decision | Reason |
+|------|----------|--------|
+| `accounts_password_pam_minlen` | `15` (`pam`; CIS `14`) | NIST SP 800-63B-4 minimum for a password used alone; checked at the next change, not on the passwords set now |
+| `accounts_password_pam_minclass` | `4` (`pam`) | CIS; NIST: no composition rules |
+| `accounts_maximum_age_login_defs`, `accounts_password_set_max_life_existing` | applied: 365 days, warning 14 (`pwage`) | CIS; NIST: no periodic change. I change both passwords about every six months anyway; the max only catches a forgotten change |
+| `accounts_minimum_age_login_defs`, `accounts_password_set_min_life_existing` | applied: 1 day (`pwage`, since 2026-11-18) | CIS; without it pwhistory (24) is cosmetic: 24 changes in a row bring the old password back. Cost: no second change of my own password the same day; root can (`sudo passwd <user>`) |
 
 ## Changed on purpose
 

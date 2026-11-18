@@ -40,6 +40,7 @@ Tests run after hardening + reboot. All passed.
 | mullvad lockdown | on |
 | path local/bin, local/sbin | root-owned, not group/world writable (a file the daily user owns there runs with the admin's rights) |
 | unit sectop, sectop-net, sectop-user@null, sectop-whois | active |
+| aging admin / null (INFO) | `min days 1, max days 365` each |
 | summary | `0 FAIL` |
 
 | Check | Command | Expected |
@@ -70,7 +71,7 @@ Tests run after hardening + reboot. All passed.
 | sysctl | `sysctl kernel.yama.ptrace_scope kernel.kexec_load_disabled fs.suid_dumpable` | `PTRACE_SCOPE`, `1`, `0` |
 | sysctl: attack surface | `sysctl kernel.io_uring_disabled dev.tty.ldisc_autoload fs.protected_fifos fs.protected_regular kernel.sysrq kernel.warn_limit kernel.oops_limit` | `2`, `0`, `2`, `2`, `0`, `100`, `100` |
 | sysctl: mmap bits | `sudo sysctl vm.mmap_rnd_bits vm.mmap_rnd_compat_bits` (root only, 0600) | `32`, `16` |
-| password quality | `echo 'Password123' \| pwscore` | rejected (< 14 chars) |
+| password quality | `echo 'Password123' \| pwscore`; `grep -E '^(minlen\|minclass\|dictcheck)' /etc/security/pwquality.conf` | rejected (< 15 chars); `15`, `4`, `1` |
 | faillock | `faillock --user "$USER"` | empty table |
 | su blocked | `su -` | `Permission denied` |
 | sudo works | `sudo -k && sudo true` | OK |
@@ -78,7 +79,7 @@ Tests run after hardening + reboot. All passed.
 | microphone off | `wpctl status` | `Sources:` empty |
 | no exposed listeners | `sudo ss -tulpn` | only localhost / `virbr0` / WireGuard |
 | loopback (firewalld) | `sudo firewall-cmd --zone=trusted --list-all` | `interfaces: lo`, 2 rich rules (127.0.0.1, ::1) |
-| password age | `sudo chage -l <user>` | `Maximum ... : 365`, `warning ... : 14` (both accounts) |
+| password age | `sudo chage -l <user>`; `grep -E '^PASS_(MAX\|MIN\|WARN)' /etc/login.defs` | `Minimum ... : 1`, `Maximum ... : 365`, `warning ... : 14` (both accounts); `365`, `1`, `14` |
 | cron dir modes | `sudo stat -c '%a %n' /etc/cron.d /etc/cron.daily` | `700` (also after an rpm-ostree update + reboot) |
 | hostfw modes | `sudo hostfw status`; `sudo hostfw noscope status` | `mode: enforce`, `noscope: enforce`, `boot mode: enforce`; `noscope mode: enforce  boot: enforce`, `watcher: active` |
 | Secure Boot | `mokutil --sb-state` | `SecureBoot enabled` |
