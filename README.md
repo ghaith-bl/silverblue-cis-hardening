@@ -12,6 +12,9 @@ deviation documented with a reason.
 > you out if they do not fit your setup (PAM, su, sudo, kernel args). No warranty
 > (GPL-3.0, sections 15-16).
 
+Threat model (for whom, goals, adversaries, accepted risks, limits):
+[docs/THREAT_MODEL.md](docs/THREAT_MODEL.md).
+
 Watched live by [sectop](https://github.com/ghaith-bl/sectop): a terminal dashboard
 whose default posture checks and watch list are this repo's baseline.
 

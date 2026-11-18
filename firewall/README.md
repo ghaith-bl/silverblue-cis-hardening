@@ -14,7 +14,9 @@ Own nftables table `inet hostfw`, next to firewalld. Zero trust LAN: router only
 - `ip rule 32764: lookup main suppress_prefixlength 0` -> non-default routes in main win
   -> the LAN subnet routed outside the tunnel (Mullvad blocks it while Allow LAN
   is off, hostfw blocks it too: out_lan)
-- IPv6: no global addr on the uplink -> no v6 internet leak, but ULA / link-local LAN open both ways
+- IPv6: out to the LAN only neighbor discovery / MLD (`out_ndp6`), fc00::/7 fe80::/10 ff00::/8
+  -> `out_lan` (drop), anything else on the uplink -> `out_leak`; new inbound: firewalld zone drop.
+  Wi-Fi profiles: IPv6 off by hand (per profile)
 - rootless Podman / kind: traffic = host output from `pasta` (no host bridge, no container IPs)
 
 ## Layers

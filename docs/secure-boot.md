@@ -77,6 +77,12 @@ Secure Boot signing certificates 2026", LWN 1079808). Present: no db update need
 | units | `systemctl --failed` | none |
 | sectop posture | security screen | pass 43, accepted 0 |
 
+## Not covered
+- Secure Boot checks shim, GRUB and the kernel, not the initramfs; `/boot` is not
+  encrypted. Someone with repeated access can change the initramfs or the boot entries
+  offline and record the LUKS passphrase. The GRUB password protects the menu only.
+  Accepted risk, see THREAT_MODEL.md (habit: the laptop not left alone in untrusted places)
+
 ## Side effects
 
 - Hibernation is blocked by lockdown ("hibernation is restricted"). Suspend works.
