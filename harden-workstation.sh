@@ -493,17 +493,20 @@ sec_su() {
 ##   (backup first): .profile .bash_login (read only without .bash_profile), .bash_completion,
 ##   .i18n (lang.sh), .config/bash_completion
 ## - the top of the home, .config, .local, .local/share immutable (those present): nothing
-##   new there, so none of the files above, no user unit, no git config. Directories
-##   already inside stay writable: tools/check-accounts.sh lists them, FAIL on known places
-##   that run code (user units, completions, git config)
+##   new there, so none of the files above, no git config. Also .config/systemd,
+##   .local/share/systemd (timer stamps live there) and .local/share/flatpak, if present:
+##   no user/ (user units) or exports/ (XDG_DATA_DIRS: completions) can be made in them.
+##   Directories already inside stay writable: tools/check-accounts.sh lists them, FAIL on
+##   known places that run code
 ## Not covered (THREAT_MODEL.md): a process the script left running until logout / reboot,
 ## the admin's own clones. Cost: nothing new at those levels without root (sudo chattr -i)
 ADMIN_RC=(bash_profile bashrc bash_logout inputrc)
 ADMIN_GONE=(.profile .bash_login .bash_completion .i18n .config/bash_completion)
-ADMIN_FROZEN=(.config .local/share .local)      # under the home, inner first; the home last
-# known places that run code; already there = writable inside the frozen dirs: warned
-ADMIN_CODE_DIRS=(.config/systemd .config/git .config/environment.d .local/share/systemd
-                 .local/share/bash-completion .local/share/flatpak)
+# under the home, inner first; the home last
+ADMIN_FROZEN=(.config/systemd .local/share/systemd .local/share/flatpak .config .local/share .local)
+# known places that run code; already there = writable: warned, look and remove by hand
+ADMIN_CODE_DIRS=(.config/systemd/user .local/share/systemd/user .config/git .config/environment.d
+                 .local/share/bash-completion .local/share/flatpak/exports)
 admin_home_lock() {
   local a=$1 home grp src f rel n=0
   home=$(user_home "$a")
@@ -560,7 +563,7 @@ admin_home_lock() {
     fi
   done
   log "admin home: shell start files from accounts/ (PATH without home dirs), immutable;"
-  log "  nothing new at the top of $home, .config, .local, .local/share (sudo chattr -i to change)"
+  log "  nothing new at the top of $home, .config, .local, .local/share, systemd / flatpak dirs (sudo chattr -i to change)"
 }
 
 ## Not CIS as a rule, CIS Controls v8 5.4 / NIST SP 800-53 AC-6(2) / NSA-CISA AA23-278A #2:

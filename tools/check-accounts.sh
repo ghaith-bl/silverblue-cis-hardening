@@ -212,7 +212,7 @@ main() {
   if [[ -z $bad ]]; then out PASS "start files" "none of .profile .bash_login .bash_completion .i18n .config/bash_completion"
   else out FAIL "start files" "present: ${bad% } (accounts section removes them)"; fi
   bad="" line=""
-  for f in "" .config .local .local/share; do
+  for f in "" .config .local .local/share .config/systemd .local/share/systemd .local/share/flatpak; do
     s=$ha${f:+/$f}
     if [[ -L $s ]]; then bad+="${f:-home}(link) "
     elif [[ -d $s ]]; then
@@ -222,8 +222,8 @@ main() {
   if [[ -z $bad ]]; then out PASS "frozen dirs" "immutable: ${line% }"
   else out FAIL "frozen dirs" "not immutable: ${bad% }"; fi
   bad=""
-  for f in .config/systemd .config/git .config/environment.d .local/share/systemd \
-           .local/share/bash-completion .local/share/flatpak; do
+  for f in .config/systemd/user .local/share/systemd/user .config/git .config/environment.d \
+           .local/share/bash-completion .local/share/flatpak/exports; do
     [[ -e $ha/$f || -L $ha/$f ]] && bad+="$f "
   done
   if [[ -z $bad ]]; then out PASS "code places" "no user units, completions, git config, flatpak exports"

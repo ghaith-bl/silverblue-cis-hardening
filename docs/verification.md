@@ -41,8 +41,8 @@ Tests run after hardening + reboot. All passed.
 | gdm methods | password only: switchable, passkey, web, smartcard off + locked |
 | rc .bash_profile, .bashrc, .bash_logout, .inputrc | as `accounts/`, 640, immutable, sha256 (first 8) |
 | start files | none of `.profile .bash_login .bash_completion .i18n .config/bash_completion` |
-| frozen dirs | immutable: home, `.config`, `.local`, `.local/share` (those present) |
-| code places | no user units, completions, git config, flatpak exports |
+| frozen dirs | immutable: home, `.config`, `.local`, `.local/share`, `.config/systemd`, `.local/share/systemd`, `.local/share/flatpak` (those present) |
+| code places | none of `.config/systemd/user`, `.local/share/systemd/user`, `.config/git`, `.config/environment.d`, `.local/share/bash-completion`, `.local/share/flatpak/exports` |
 | writable dirs (INFO) | folders already inside (results, clones, caches) |
 | home admin / home null | `700 <admin>` / `700 null` |
 | sysusers admin / daily | `m <admin> sectop` / no line |
