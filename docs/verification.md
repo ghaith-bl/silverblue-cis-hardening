@@ -34,7 +34,16 @@ Tests run after hardening + reboot. All passed.
 | live wheel / mullvad | no daily process holds it |
 | sudo: daily / admin | not allowed / `(ALL) ALL` |
 | root password | locked |
-| gdm list / gdm login | admin hidden / admin refused (pam_succeed_if) |
+| gdm list | admin hidden |
+| gdm password / gdm autologin | admin refused (pam_succeed_if) / unused: no automatic or timed login in `/etc/gdm/custom.conf` |
+| gdm fingerprint, smartcard, switchable-auth | refuses every user (stub / pam_deny in its auth stack) |
+| gdm launch-environment (INFO) | the greeter's own session |
+| gdm methods | password only: switchable, passkey, web, smartcard off + locked |
+| rc .bash_profile, .bashrc, .bash_logout, .inputrc | as `accounts/`, 640, immutable, sha256 (first 8) |
+| start files | none of `.profile .bash_login .bash_completion .i18n .config/bash_completion` |
+| frozen dirs | immutable: home, `.config`, `.local`, `.local/share` (those present) |
+| code places | no user units, completions, git config, flatpak exports |
+| writable dirs (INFO) | folders already inside (results, clones, caches) |
 | home admin / home null | `700 <admin>` / `700 null` |
 | sysusers admin / daily | `m <admin> sectop` / no line |
 | mullvad lockdown | on |
@@ -48,6 +57,9 @@ Tests run after hardening + reboot. All passed.
 | daily user has no sudo | as null: `sudo -v` | `may not run sudo`, line in `/var/log/sudo.log` |
 | admin not in GDM | GDM user list; typing the admin name at GDM | not listed; refused |
 | admin on the console | Ctrl+Alt+F3, admin login, `sudo -v` | OK |
+| admin PATH | as the admin: `bash -lc 'echo $PATH'` | `/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin` |
+| admin shell files locked | as the admin: `echo 'alias sudo=x' >> ~/.bashrc`; `mv ~/.bashrc ~/b`; `touch ~/.bash_completion`; `mkdir ~/.config/systemd` | `Operation not permitted` each |
+| GDM methods | `DCONF_PROFILE=gdm dconf read /org/gnome/login-screen/enable-switchable-authentication`; `DCONF_PROFILE=gdm dconf list-locks /org/gnome/login-screen/` | `false`; the `enable-*-authentication` keys + `disable-user-list` |
 | helper channel | `ls -ld /run/sectop-user/null; ls -l /run/sectop-user/null` | `null sectop-feed` 0750, `socks.json` 0640 |
 | daily user can't read sectop | as null: `cat /run/sectop/state.json` | Permission denied |
 | discovery ports dropped inbound | `sudo nft list chain inet hostfw input \| grep -c in_disco`; later `sudo hostfw counters \| grep in_disco` | `2`; in_disco grows on a LAN with phones / TVs (mDNS, SSDP) |

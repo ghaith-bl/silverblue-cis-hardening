@@ -149,6 +149,9 @@ mask_units() {
 
 user_home() { getent passwd "$1" | cut -d: -f6; }
 
+# immutable <path>: chattr +i set (first lsattr field holds a lowercase i; no link followed)
+immutable() { [[ ! -L $1 && $(lsattr -d -- "$1" 2>/dev/null) =~ ^[^[:space:]]*i ]]; }
+
 # add_karg <arg>...   rpm-ostree: one new deployment for all missing args, used from the
 # next boot; the deployment booted now stays in GRUB (rollback)
 add_karg() {
@@ -328,14 +331,23 @@ EOF
 EOF
 
   if grep -qs 'system-db:gdm' /etc/dconf/profile/gdm /usr/share/dconf/profile/gdm; then
-    write_file /etc/dconf/db/gdm.d/90-cis-hardening 0644 <<'EOF'
-[org/gnome/login-screen]
-disable-user-list=true
-EOF
-    write_file /etc/dconf/db/gdm.d/locks/90-cis-hardening 0644 <<'EOF'
-/org/gnome/login-screen/disable-user-list
-EOF
-    # the same in db "distro" (also in GDM's profile): scap-security-guide checks only there
+    # login screen: password only (review A-4). Switchable authentication (GDM 50: passkey
+    # and web login ride on it, own keys; GDM 51 dropped those two) and smartcard off,
+    # fingerprint too with FINGERPRINT=disable. Their PAM services (gdm-switchable-auth,
+    # gdm-smartcard, gdm-fingerprint) use authselect stubs that refuse every user; the
+    # locked keys keep GDM off them if a later profile gives them a real stack
+    local -a gdm_off=(enable-switchable-authentication enable-passkey-authentication
+                      enable-web-authentication enable-smartcard-authentication)
+    if [[ $FINGERPRINT == disable ]]; then gdm_off+=(enable-fingerprint-authentication); fi
+    {
+      printf '[org/gnome/login-screen]\ndisable-user-list=true\n'
+      printf '%s=false\n' "${gdm_off[@]}"
+    } | write_file /etc/dconf/db/gdm.d/90-cis-hardening 0644
+    printf '/org/gnome/login-screen/%s\n' disable-user-list "${gdm_off[@]}" |
+      write_file /etc/dconf/db/gdm.d/locks/90-cis-hardening 0644
+    log "GDM: password login only (off + locked: ${gdm_off[*]#enable-})"
+    # disable-user-list again in db "distro" (also in GDM's profile): scap-security-guide
+    # checks only there
     write_file /etc/dconf/db/distro.d/90-cis-hardening 0644 <<'EOF'
 [org/gnome/login-screen]
 disable-user-list=true
@@ -344,7 +356,7 @@ EOF
 /org/gnome/login-screen/disable-user-list
 EOF
   else
-    warn "gdm dconf profile not found - skipped hiding the login user list"
+    warn "gdm dconf profile not found - login user list and GDM login methods left as they are"
   fi
   dconf update && log "dconf databases updated (log out/in to see changes)"
 }
@@ -470,15 +482,96 @@ sec_su() {
   fi
 }
 
+## Admin home (review A-3, not CIS). A script handed to the admin runs as the admin: it
+## could put an alias, a function or a PATH entry for sudo into a file the admin's shell
+## reads, and catch the password at the next sudo. Here:
+## - shell start files = accounts/admin.* (fixed PATH, no ~/.bashrc.d, readline includes
+##   /etc/inputrc), immutable (chattr +i: no write, rename, delete or chmod, not even by the
+##   owner). Owner stays the admin: CIS 7.2.9 rules want that, and a root-owned file in a
+##   home the admin owns protects nothing (the admin can rename it and put its own there)
+## - files bash, /etc/profile.d or bash-completion read at start, unused here, removed
+##   (backup first): .profile .bash_login (read only without .bash_profile), .bash_completion,
+##   .i18n (lang.sh), .config/bash_completion
+## - the top of the home, .config, .local, .local/share immutable (those present): nothing
+##   new there, so none of the files above, no user unit, no git config. Directories
+##   already inside stay writable: tools/check-accounts.sh lists them, FAIL on known places
+##   that run code (user units, completions, git config)
+## Not covered (THREAT_MODEL.md): a process the script left running until logout / reboot,
+## the admin's own clones. Cost: nothing new at those levels without root (sudo chattr -i)
+ADMIN_RC=(bash_profile bashrc bash_logout inputrc)
+ADMIN_GONE=(.profile .bash_login .bash_completion .i18n .config/bash_completion)
+ADMIN_FROZEN=(.config .local/share .local)      # under the home, inner first; the home last
+# known places that run code; already there = writable inside the frozen dirs: warned
+ADMIN_CODE_DIRS=(.config/systemd .config/git .config/environment.d .local/share/systemd
+                 .local/share/bash-completion .local/share/flatpak)
+admin_home_lock() {
+  local a=$1 home grp src f rel n=0
+  home=$(user_home "$a")
+  grp=$(id -gn "$a")
+  [[ $home == /?* && -d $home && ! -L $home ]] || { warn "admin home '$home' not found - lock skipped"; return 0; }
+  if ! command -v chattr >/dev/null || ! command -v lsattr >/dev/null; then
+    warn "no chattr / lsattr - admin home lock skipped"; return 0
+  fi
+  src="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/accounts"
+  for f in "${ADMIN_RC[@]}"; do
+    [[ -f $src/admin.$f ]] || { warn "missing $src/admin.$f - admin home lock skipped"; return 0; }
+  done
+
+  # unlock what an earlier run locked; locked again below
+  for rel in "${ADMIN_RC[@]/#/.}" "${ADMIN_FROZEN[@]}" .; do
+    f=$home/$rel
+    if immutable "$f"; then chattr -i -- "$f" || die "chattr -i $f failed"; fi
+  done
+
+  for f in "${ADMIN_RC[@]}"; do
+    if [[ -f $home/.$f && ! -L $home/.$f ]] && cmp -s "$src/admin.$f" "$home/.$f"; then continue; fi
+    backup "$home/.$f"
+    install -m 0640 -o "$a" -g "$grp" "$src/admin.$f" "$home/.$f"    # replaces a link too
+    restorecon -F "$home/.$f" 2>/dev/null || true
+    log "$home/.$f <- accounts/admin.$f"; n=$((n + 1))
+  done
+  chown "$a:$grp" "${ADMIN_RC[@]/#/$home/.}"
+  chmod 0640 "${ADMIN_RC[@]/#/$home/.}"
+  (( n )) || log "admin shell start files: no change"
+
+  for rel in "${ADMIN_GONE[@]}"; do
+    f=$home/$rel
+    [[ -f $f || -L $f ]] || continue
+    if immutable "$f"; then chattr -i -- "$f" || die "chattr -i $f failed"; fi
+    backup "$f"
+    rm -f -- "$f"
+    warn "removed $f (read at shell start; copy in $BACKUP_ROOT)"
+  done
+  # history: bash writes it at logout, it cannot create it once the home is locked
+  [[ -e $home/.bash_history ]] || install -m 0600 -o "$a" -g "$grp" /dev/null "$home/.bash_history"
+
+  for f in "${ADMIN_RC[@]}"; do
+    chattr +i -- "$home/.$f" || warn "chattr +i $home/.$f failed (filesystem without it?)"
+  done
+  for rel in "${ADMIN_FROZEN[@]}" .; do
+    f=$home/$rel
+    if [[ -L $f ]]; then warn "$f is a link: not locked, look at it"; continue; fi
+    [[ -d $f ]] || continue
+    chattr +i -- "$f" || warn "chattr +i $f failed"
+  done
+  for rel in "${ADMIN_CODE_DIRS[@]}"; do
+    if [[ -e $home/$rel || -L $home/$rel ]]; then
+      warn "$home/$rel exists and stays writable (runs code): look, remove by hand"
+    fi
+  done
+  log "admin home: shell start files from accounts/ (PATH without home dirs), immutable;"
+  log "  nothing new at the top of $home, .config, .local, .local/share (sudo chattr -i to change)"
+}
+
 ## Not CIS as a rule, CIS Controls v8 5.4 / NIST SP 800-53 AC-6(2) / NSA-CISA AA23-278A #2:
 ## admin work from an account used for nothing else. ADMIN_USER: wheel, text console only
 ## (hidden from GDM, GDM login refused). DAILY_USER: GNOME, browsers, no sudo.
-## Run 1 (any sudo user): admin account + GDM + homes. Its password is set by hand on a
-## text console. Run 2 from the admin itself (its sudo is the proof it works): the daily
+## Run 1 (any sudo user): admin account + GDM + homes + admin home lock (admin_home_lock,
+## both runs). Its password is set by hand on a text console. Run 2 from the admin itself (its sudo is the proof it works): the daily
 ## user leaves wheel, the Mullvad group and sectop's reader group. Never the other way: root is locked, a daily
 ## user out of wheel before the admin's sudo works = no sudo left.
 sec_accounts() {
-  local a=$ADMIN_USER d=$DAILY_USER as f pam=/etc/pam.d/gdm-password g
+  local a=$ADMIN_USER d=$DAILY_USER as f h pam=/etc/pam.d/gdm-password g
   local line="auth       requisite   pam_succeed_if.so user != ${ADMIN_USER} quiet_success"
   if [[ -z $a || -z $d ]]; then log "ADMIN_USER / DAILY_USER empty: one account, nothing to do"; return 0; fi
   for f in "$a" "$d"; do
@@ -526,10 +619,18 @@ sec_accounts() {
     warn "$pam missing (no GDM?) - GDM line skipped"
   fi
 
-  # --- homes: owner only
+  # --- homes: owner only (the admin's may be locked from an earlier run: unlocked for
+  # chmod, locked again by admin_home_lock)
   for f in "$a" "$d"; do
-    chmod 0700 "$(user_home "$f")" && log "home of $f -> 0700"
+    h=$(user_home "$f")
+    if [[ $(stat -c %a "$h") != 700 ]]; then
+      if immutable "$h"; then chattr -i -- "$h"; fi
+      chmod 0700 "$h" && log "home of $f -> 0700"
+    else
+      log "home of $f: 0700"
+    fi
   done
+  admin_home_lock "$a"
   [[ $(passwd -S root 2>/dev/null | awk '{print $2}') == L* ]] || warn "root password not locked"
 
   # --- run 2: only from the admin (sudo from it works = safe to take the daily user's)

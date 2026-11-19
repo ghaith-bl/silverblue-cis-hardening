@@ -21,6 +21,12 @@ sudo nmcli con modify <uuid> ipv4.ignore-auto-dns no   # router DNS back (or old
 sudo usermod -aG wheel <daily>                   # accounts: from the admin; then the
 sudo sed -i '1{/pam_succeed_if.so user != /d}' /etc/pam.d/gdm-password   # admin in GDM again
 sudo rm /var/lib/AccountsService/users/<admin>   # admin in the GDM list (after a reboot)
+h=$(getent passwd <admin> | cut -d: -f6)         # accounts: admin home lock off (then edit freely;
+sudo chattr -i "$h" "$h"/.config "$h"/.local "$h"/.local/share "$h"/.bash_profile "$h"/.bashrc "$h"/.bash_logout "$h"/.inputrc
+                                                 # Fedora's files: sudo cp /etc/skel/.bash* "$h"/, chown;
+                                                 # removed files: /var/backups/hardening/<ts>$h/)
+sudo rm /etc/dconf/db/gdm.d/90-cis-hardening /etc/dconf/db/gdm.d/locks/90-cis-hardening && sudo dconf update
+                                                 # gnome: GDM login methods + user list back to defaults
 sudo rm /etc/systemd/system/mullvad-daemon.service.d/50-socket-group.conf
 sudo systemctl daemon-reload && sudo systemctl restart mullvad-daemon
 sudo systemctl disable --now kvmlan              # VMs blocked by Mullvad again (table deleted)

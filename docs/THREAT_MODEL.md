@@ -77,7 +77,9 @@ studying, testing and adding, and this page changes with it.
 - isolation: random links in a throwaway VM (browsevm: confined, own network, disk in RAM,
   its window in its own sandbox); programs in their own systemd units, so the firewall
   knows who sends
-- accounts: a daily user without sudo, an admin only on a text console, root locked
+- accounts: a daily user without sudo, an admin only on a text console (its shell files
+  locked, nothing new can be put in its home), root locked; the login screen takes a
+  password only
 - devices: USBGuard (only known USB devices), microphone off, no camera, location service
   off (host; into the script: planned)
 - network privacy: random MAC per network, a generic hostname, no DHCP ids from the
@@ -106,7 +108,7 @@ studying, testing and adding, and this page changes with it.
 |-------|---------------|
 | data on the disk | LUKS2 (aes-xts-plain64, 512-bit key), Secure Boot, lockdown |
 | the disk passphrase | memorized; argon2id (t=8, 1 GiB, 4 threads); typed only at boot |
-| the admin password | root locked; admin only on the text console, never typed in the desktop |
+| the admin password | root locked; admin only on the text console, never typed in the desktop; its shell files locked, so a script I run as the admin cannot wait in its shell for the next sudo |
 | browser sessions, cookies, saved logins | profiles per use, hardened policies; random links only in browsevm |
 | network identity: real IP, DNS queries, VPN account and keys | VPN lockdown mode + hostfw, DNS only in the tunnel, VPN control for one group only |
 | identifiers: MAC, hostname, DHCP ids, IPv6 addresses, browser fingerprint | netprivacy (random MAC, generic hostname, ids from the random MAC), IPv6 off on Wi-Fi profiles, Mullvad Browser / Tor Browser |
@@ -195,6 +197,13 @@ Tor, Qubes and Tails list the same kind of limits.
 - journal: persistent; only journald's default size cap (10 % of the filesystem, at most
   4 GiB): 2.9 GB, history since 2026-07 (measured 2026-11-18). Decided: one month,
   applied in the journald step
+- admin account: scripts from my daily session run as the admin, after I read them in
+  full (`tools/admin-run.sh`). If a bad one gets through, it cannot hide in the admin's
+  shell: the shell files are locked, PATH has no folder from the home, and nothing new
+  can be created at the top of the home or in its config folders. Two ways stay open,
+  both planned: a process the script leaves running until I log out or reboot, and the
+  admin's own clones of these repos (a changed file there runs with sudo later). Root
+  in the end comes from the review, not from these locks
 - browsevm viewer (beta): the sound socket it needs for the VM's sound would also let a
   taken-over viewer listen to what other programs play (not the microphone: off); no
   system-call filter (seccomp) yet

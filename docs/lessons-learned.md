@@ -50,6 +50,18 @@
   (found a dangling `docker.service` symlink and an old firewalld `docker` zone).
 - authselect `local` profile is the default since Fedora 40; features: `with-faillock`, `with-pwhistory`, `without-nullok`.
 - `with-fingerprint` enabled without a reader + faillock -> risk of fast lockouts. Disable it first.
+- A root-owned file in a home the user owns protects nothing: the user can rename it and
+  put its own in its place (needs only write on the folder). `chattr +i` blocks write,
+  rename, delete and chmod even for the owner; `chattr +i` on a folder blocks new entries
+  in it, not changes inside the folders below it. Tested 2026-11-18.
+- What a bash login reads from the home is more than the rc files: `/etc/profile.d/lang.sh`
+  reads `~/.i18n`, `/etc/profile.d/bash_completion.sh` sources `~/.config/bash_completion`,
+  bash-completion sources `~/.bash_completion` and loads completions (code) from
+  `~/.local/share/bash-completion` and every `XDG_DATA_DIRS` entry. Fedora's skel `.bashrc`
+  adds `~/.local/bin:~/bin` to PATH and sources `~/.bashrc.d/*`.
+- GDM 50 had `enable-passkey-authentication` / `enable-web-authentication`; GDM 51 dropped
+  them (passkey and web login ride on `enable-switchable-authentication`, service
+  `gdm-switchable-auth`). An unknown dconf key is ignored.
 
 ## Secure Boot / kernel modules
 

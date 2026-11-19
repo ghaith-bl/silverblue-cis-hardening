@@ -75,7 +75,7 @@ sudo ./harden-workstation.sh all
 | `DISABLE_AVAHI`        | `yes`      | mDNS / network printer discovery off |
 | `GUEST_TOOLS`          | `(open-vm-tools-desktop open-vm-tools virtualbox-guest-additions spice-vdagent)` | `guesttools`: VM guest agents removed from the image on real hardware; `()` = keep |
 | `SSH_SERVER`           | `off`      | `off` masks sshd (incoming only, outgoing `ssh` works) |
-| `FINGERPRINT`          | `disable`  | turn off `with-fingerprint` before enabling faillock |
+| `FINGERPRINT`          | `disable`  | turn off `with-fingerprint` before enabling faillock; GDM fingerprint login off (locked) |
 | `MIC_DISABLE`          | `internal` | `internal` / `all` / `no`, via WirePlumber, speakers unaffected |
 | `ENABLE_NOISY_AUDIT`   | `no`       | DAC / delete / failed-open audit rules (very noisy with Steam / Brave) |
 | `MAKE_AUDIT_IMMUTABLE` | `yes`      | `-e 2`: audit rules locked until reboot |
@@ -149,12 +149,12 @@ sudo ./harden-workstation.sh kargs    # reboot: LUKS unlock, Wi-Fi, VPN, a VM
 | `modules`     | blocks unused filesystems / protocols | no HFS / UDF mounts |
 | `coredump`    | no core dumps | crashes not saved |
 | `journald`    | persistent, compressed journal, no syslog forward (drop-in + main file) | none |
-| `gnome`       | no automount / autorun, 15 min idle lock, no login user list (dconf `gdm` + `distro`, all locked) | type the user name at login |
+| `gnome`       | no automount / autorun, 15 min idle lock, no login user list (dconf `gdm` + `distro`, all locked); GDM: password login only (switchable authentication, passkey, web login, smartcard off and locked; fingerprint with `FINGERPRINT=disable`) | type the user name at login; no other login method offered |
 | `sudo`        | `use_pty`, `/var/log/sudo.log`, 5 min timeout | password asked again after 5 min |
 | `pam`         | faillock (5 tries -> 15 min), pwhistory (24), pwquality (15 chars, 4 classes, dictionary check), no empty passwords | lockout includes the lock screen |
 | `pwage`       | password max age `PASS_MAX_DAYS`, min age `PASS_MIN_DAYS`, warning `PASS_WARN_AGE` (login.defs + every login account); no lock after expiry | change the password once a year; not twice in one day (root can: `sudo passwd <user>`) |
 | `su`          | `su` limited to the empty group `sugroup` | use `sudo` |
-| `accounts`    | CIS Controls v8 5.4: admin in wheel, hidden from and refused by GDM; daily user out of wheel, `mullvad`, `sectop`; homes 0700. Run 2 only from the admin | admin: text console only; daily user: no sudo, no Mullvad CLI |
+| `accounts`    | CIS Controls v8 5.4: admin in wheel, hidden from and refused by GDM; daily user out of wheel, `mullvad`, `sectop`; homes 0700. Not CIS: the admin's shell start files from `accounts/` (fixed PATH, no `~/.bashrc.d`), immutable; the top of its home, `.config`, `.local`, `.local/share` immutable (nothing new there). Run 2 only from the admin | admin: text console only; its shell files and new files at those levels only after `sudo chattr -i`; daily user: no sudo, no Mullvad CLI |
 | `services`    | mask rpcbind / nfs / avahi, nftables.service | no mDNS |
 | `guesttools`  | CIS Controls v8 4.8: `GUEST_TOOLS` removed from the image (`rpm-ostree override remove`, next boot) when the machine is not a VM and nothing else needs them: one setuid root program (`vmware-user-suid-wrapper`) and three agents started at login less. Their setuid files leave `55-privileged.rules` in the same go | none on real hardware; one reboot |
 | `loopback`    | firewalld: `lo` in zone `trusted`, 127.0.0.1 / ::1 as source only toward themselves | none |
@@ -191,6 +191,13 @@ else. Root stays locked.
 
 - Repos: the daily user commits and pushes; the admin pulls its own https clones,
   reviews, then installs. The admin never runs code from the daily user's home.
+- Admin home: a script run as the admin cannot hide in its shell. Start files
+  (`.bash_profile`, `.bashrc`, `.bash_logout`, `.inputrc`) = `accounts/admin.*`, immutable,
+  PATH only from root-owned dirs; files bash, `/etc/profile.d` or bash-completion would read
+  from the home (`.bash_completion`, `.i18n`, ...) removed and cannot come back: the top of
+  the home, `.config`, `.local`, `.local/share` are immutable. Folders already there
+  (scripts, clones, results) stay writable. Not covered: a process the script left
+  running, the admin's clones ([docs/THREAT_MODEL.md](docs/THREAT_MODEL.md))
 - Host changes: one script per step, handed over in `/tmp/to-admin` and run with
   `tools/admin-run.sh <step>.sh` on tty3 (shows the script, asks for the first 8
   characters of its sha256, sudo per line, output copy in `/tmp/from-admin`).

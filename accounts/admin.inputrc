@@ -1,0 +1,4 @@
+# ~/.inputrc of the admin account (harden-workstation.sh accounts, accounts/admin.*)
+# Immutable (chattr +i): key bindings can type whole commands, so this file is part of the
+# lock. Readline reads it instead of /etc/inputrc, so it includes that file.
+$include /etc/inputrc
