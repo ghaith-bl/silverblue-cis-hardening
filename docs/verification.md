@@ -135,6 +135,7 @@ Tests run after hardening + reboot. All passed.
 | io_uring tries since boot | `sudo ausearch -k io-uring -ts boot -i \| grep -o 'exe=[^ ]*' \| sort \| uniq -c` | only the test above (python3) |
 | page allocator shuffle | `sudo cat /sys/module/page_alloc/parameters/shuffle` (root only, 0400) | `Y` |
 | GRUB password | `sudo test -f /boot/grub2/user.cfg && echo set`; menu: `e` on an entry | `set`; asks user `root` + password; plain boot asks nothing |
+| kargs in every boot entry | `sudo grep -h '^options' /boot/loader/entries/*.conf` | the same args on every line (after a kargs change: from the next OS update on; host 2026-11-18: both entries) |
 | AF_ALG tries since boot | `sudo ausearch -k af-alg -sc socket -ts boot -i \| grep -o 'exe=[^ ]*' \| sort \| uniq -c` | only the test above (python3) |
 | unowned / world-writable | `sudo find / -xdev \( -nouser -o -nogroup \)` etc. | none |
 | USBGuard on | `systemctl is-enabled usbguard; systemctl is-active usbguard` | `enabled`, `active` |

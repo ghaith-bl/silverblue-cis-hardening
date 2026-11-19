@@ -44,7 +44,8 @@ rpm-ostree install brave-browser
 ```
 
 Then add `repo_gpgcheck=1` below `gpgcheck=1`: Brave signs the repo metadata
-(`repodata/repomd.xml.asc`), so a mirror cannot hide or roll back updates.
+(`repodata/repomd.xml.asc`), so a mirror cannot change the package list unnoticed.
+It can still serve an older signed copy (hold updates back): the signature does not stop that.
 Check: `sudo rpm-ostree refresh-md --force` must finish without a signature error.
 
 Signing keys (`gpgkey=` in the repo file), compared with https://brave.com/signing-keys/
@@ -172,8 +173,9 @@ Same intent in both browsers.
 - **Safe Browsing stays on** (the first Brave draft had it off; it was never applied -
   no profile in either browser had it disabled):
   - CIS requires it.
-  - Brave proxies every Safe Browsing request through its own server: Google never
-    sees my IP, only a short hash prefix after a local match.
+  - Brave proxies every Safe Browsing request through its own server: Google does not
+    see my IP, only a short hash prefix after a local match (Brave's description, not
+    tested here).
   - Firefox checks against a local list; only the *remote download lookup*
     (sends file metadata to Google) is turned off.
   - To go back to off: Brave `SafeBrowsingProtectionLevel: 0` and drop

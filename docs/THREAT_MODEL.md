@@ -50,14 +50,15 @@ studying, testing and adding, and this page changes with it.
 - **I log in.** My daily account has no admin rights. The admin account exists only on
   a text console; I never type its password in the desktop.
 - **I join a cafe Wi-Fi.** The laptop shows a new random MAC and no real name. Nothing
-  goes out except the VPN tunnel, DNS too; the cafe network cannot reach the laptop. A
-  network I have never used still needs a manual step from me (IPv6 off, its DNS
-  ignored); making it automatic is planned.
+  goes out except the VPN tunnel, DNS too; new connections from the cafe network are
+  dropped. A network I have never used still needs a manual step from me (IPv6 off, its
+  DNS ignored); making it automatic is planned.
 - **I browse.** My browsers are hardened, with separate profiles for separate uses.
   A link I do not trust opens in a throwaway VM that is gone when I close it.
-- **A program goes bad.** It cannot read or change other programs' memory, cannot use
-  sudo or su, and the firewall sees which program unit sends what.
-  The kernel is hardened to make the step to root harder.
+- **A program goes bad.** It cannot attach to other programs to read or change their
+  memory (ptrace off for everyone), cannot use sudo or su, and the firewall sees which
+  program unit sends what. It still runs as me: my files, browser profiles and unlocked
+  keyring are open to it. The kernel is hardened to make the step to root harder.
 - **I plug in a USB stick I do not know.** It is blocked until I allow it as admin.
 - **Updates.** System updates are prepared every day and used at the next reboot; apps
   every day; the browsing VM is rebuilt every week.
@@ -108,7 +109,7 @@ studying, testing and adding, and this page changes with it.
 |-------|---------------|
 | data on the disk | LUKS2 (aes-xts-plain64, 512-bit key), Secure Boot, lockdown |
 | the disk passphrase | memorized; argon2id (t=8, 1 GiB, 4 threads); typed only at boot |
-| the admin password | root locked; admin only on the text console, never typed in the desktop; its shell files locked, so a script I run as the admin cannot wait in its shell for the next sudo |
+| the admin password | root locked; admin only on the text console, never typed in the desktop; its shell files locked, so a script I run as the admin cannot plant an alias or a PATH entry for the next sudo (14 tries refused, 2026-11-19); a process it leaves running: open (below) |
 | browser sessions, cookies, saved logins | profiles per use, hardened policies; random links only in browsevm |
 | network identity: real IP, DNS queries, VPN account and keys | VPN lockdown mode + hostfw, DNS only in the tunnel, VPN control for one group only |
 | identifiers: MAC, hostname, DHCP ids, IPv6 addresses, browser fingerprint | netprivacy (random MAC, generic hostname, ids from the random MAC), IPv6 off on Wi-Fi profiles, Mullvad Browser / Tor Browser |
@@ -119,7 +120,7 @@ studying, testing and adding, and this page changes with it.
 | # | Capability | Covered |
 |---|------------|---------|
 | A1 | web content: trackers, fingerprinting, browser exploits | yes: browser hardening, browsevm for unknown links |
-| A2 | malware in my daily session, no root | yes: no sudo, ptrace off, firewall per program scope, kernel hardening against the step to root |
+| A2 | malware in my daily session, no root | partly: no sudo, ptrace off, firewall per program scope, kernel hardening against the step to root; what my daily user can read (files, browser profiles, the unlocked keyring) is open to it |
 | A3 | the local network: public Wi-Fi, router, other devices | yes: inbound drop, no LAN traffic outside the tunnel, no LLMNR / mDNS / hostname |
 | A4 | network observers (ISP, upstream): metadata, DNS, time | partly: they see an encrypted tunnel to the VPN, its size and timing |
 | A5 | service providers, data brokers: linking identities | partly: separate profiles, fingerprint-resistant browsers; a login links sessions whatever the network does |
@@ -188,7 +189,8 @@ Tor, Qubes and Tails list the same kind of limits.
   profile does not; a new network's profile gets IPv6 (until turned off by hand) and the
   network's DNS (until netprivacy runs again)
 - time: the clock audit rule leaves out chronyd (it adjusts the clock all the time); NTS
-  needs a roughly right clock: far off = set by hand
+  needs a roughly right clock: far off = set by hand from a trusted device
+  ([rollback.md](rollback.md), "Clock far off"), not `nocerttimecheck`
 - browsevm: Mullvad Browser with the Mullvad extension's proxy on exits from another
   Mullvad server than the host (Mullvad itself sees both); Brave, or the proxy off: the
   host's VPN exit. Tor Browser in browsevm: planned
@@ -199,7 +201,7 @@ Tor, Qubes and Tails list the same kind of limits.
   applied in the journald step
 - admin account: scripts from my daily session run as the admin, after I read them in
   full (`tools/admin-run.sh`). If a bad one gets through, it cannot hide in the admin's
-  shell: the shell files are locked, PATH has no folder from the home, and nothing new
+  shell (14 plant tries refused on the host, 2026-11-19): the shell files are locked, PATH has no folder from the home, and nothing new
   can be created at the top of the home or in its config folders. Two ways stay open,
   both planned: a process the script leaves running until I log out or reboot, and the
   admin's own clones of these repos (a changed file there runs with sudo later). Root

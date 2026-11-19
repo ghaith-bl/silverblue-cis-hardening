@@ -566,7 +566,7 @@ admin_home_lock() {
   log "  nothing new at the top of $home, .config, .local, .local/share, systemd / flatpak dirs (sudo chattr -i to change)"
 }
 
-## Not CIS as a rule, CIS Controls v8 5.4 / NIST SP 800-53 AC-6(2) / NSA-CISA AA23-278A #2:
+## Not CIS as a rule, CIS Controls v8.1 5.4 / NIST SP 800-53 AC-6(2) / NSA-CISA AA23-278A #2:
 ## admin work from an account used for nothing else. ADMIN_USER: wheel, text console only
 ## (hidden from GDM, GDM login refused). DAILY_USER: GNOME, browsers, no sudo.
 ## Run 1 (any sudo user): admin account + GDM + homes + admin home lock (admin_home_lock,
@@ -677,7 +677,7 @@ sec_services() {
   fi
 }
 
-## CIS Controls v8 4.8 (uninstall unnecessary software): guest agents for VMware, VirtualBox
+## CIS Controls v8.1 4.8 (uninstall or disable unnecessary services): guest agents for VMware, VirtualBox
 ## and SPICE are in Fedora's base image for when it runs as a VM. On real hardware they do
 ## nothing useful, but they bring a setuid root program (vmware-user-suid-wrapper) and agents
 ## started at every login. Removed from the image with rpm-ostree (new deployment, next boot),
@@ -1293,7 +1293,7 @@ fw_policy() {
   firewall-cmd --permanent --policy="$name" --set-target="$target" >/dev/null || warn "policy $name: target $target"
 }
 
-## Not CIS, NIST SP 800-53 SC-44 (detonation chamber) / SC-39 / CIS Controls v8 Control 9:
+## Not CIS, NIST SP 800-53 SC-44 (detonation chamber) / SC-39 / CIS Controls v8.1 Control 9:
 ## random links in a throwaway VM (docs/browsevm.md). Step 1 = its network only: libvirt
 ## NAT network "browse" on BROWSEVM_BRIDGE, firewalld zone "browsevm" + policies (DHCP + DNS
 ## to the host, nothing else), hostfw if_vm_iso (tunnel only, never a lab VM or the LAN), kvmlan
@@ -1559,7 +1559,7 @@ sec_appunit() {
   log "close the apps, then log out and in once: started from the menu they run in app-<id>@<pid>.service"
 }
 
-## CIS Controls v8 7.3, 7.4 (automated OS and application patch
+## CIS Controls v8.1 7.3, 7.4 (automated OS and application patch
 ## management): rpm-ostree's own automatic updates (rpm-ostreed.conf AutomaticUpdatePolicy,
 ## rpm-ostreed-automatic.timer: an hour after boot, then daily). "stage" downloads the new
 ## deployment with its layered packages (Mullvad VPN, Brave, ...) and leaves it for the next

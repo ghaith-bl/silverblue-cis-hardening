@@ -11,7 +11,7 @@
 #   (no secrets: group lists, modes, unit states; tty consoles can't copy/paste)
 # - exit 0 = no FAIL, 1 = at least one FAIL, 2 = usage error
 #
-# refs: CIS Controls v8 5.4, NIST SP 800-53 AC-6(2), NSA/CISA AA23-278A
+# refs: CIS Controls v8.1 5.4, NIST SP 800-53 AC-6(2), NSA/CISA AA23-278A
 set -uo pipefail
 umask 077
 

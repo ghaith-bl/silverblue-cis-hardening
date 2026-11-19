@@ -15,7 +15,7 @@ Input for an OpenSCAP tailoring file.
 | `package_httpd_removed`, `package_rsync_removed` | skip | part of the base image, not running, not removable without `rpm-ostree override remove` |
 | `kernel_module_usb-storage_disabled` | skip (option) | USB drives still needed; `DISABLE_USB_STORAGE=yes` to apply |
 
-## Not useful on a single-user laptop
+## Not useful on a personal device
 
 | Rule | Decision | Reason |
 |------|----------|--------|
@@ -54,7 +54,7 @@ compromise: change the password at once (`sudo passwd <user>` works the same day
 | Rule | Decision | Reason |
 |------|----------|--------|
 | `sysctl_kernel_kptr_restrict` | set `2` | stricter than the CIS value `1` (hidden from root too) |
-| `sysctl_kernel_yama_ptrace_scope` | set `3` (decision `PTRACE_SCOPE`, 2026-11-16; `2` since 2026-10-30) | no attach for anyone, root included (KSPP); `2` was admin-only attach, idea from secureblue. CIS RHEL 9 v3.0.0 accepts `1`, `2` or `3` and recommends `2`; RHEL 9 STIG (RHEL-09-213080) wants exactly `1`: finding there. Scanner fails if its profile value is `1`. Why 3: closes the easiest way for root (or malware that got root) to read or change a running program's memory (ptrace, /proc/<pid>/mem, process_vm_readv: keyring, browser secrets) and makes the rest harder; root still has other ways (run as the user and ask its Secret Service, eBPF, uprobes, change the sysctl file and reboot): against root this setup detects, it does not prevent (THREAT_MODEL.md). Programs that only read /proc (sectop, ps, btop, osquery, auditd) are not affected: Yama checks attach only. Cost: `gdb` / `strace` / `ltrace` / CRIU (`podman container checkpoint`) do not work, not even with sudo: use them in the lab VMs (own kernel; toolbox shares this one). Anti-cheat games need ptrace (none here). One-way until reboot. Undo: `PTRACE_SCOPE=2`, sysctl section, reboot |
+| `sysctl_kernel_yama_ptrace_scope` | set `3` (decision `PTRACE_SCOPE`, 2026-11-16; `2` since 2026-10-30) | no attach for anyone, root included (KSPP); `2` was admin-only attach, idea from secureblue. CIS RHEL 9 v3.0.0 accepts `1`, `2` or `3` and recommends `2`; RHEL 9 STIG (V-257811) wants exactly `1`: finding there. Scanner fails if its profile value is `1`. Why 3: closes the easiest way for root (or malware that got root) to read or change a running program's memory (ptrace, /proc/<pid>/mem, process_vm_readv: keyring, browser secrets) and makes the rest harder; root still has other ways (run as the user and ask its Secret Service, eBPF, uprobes, change the sysctl file and reboot): against root this setup detects, it does not prevent (THREAT_MODEL.md). Programs that only read /proc (sectop, ps, btop, osquery, auditd) are not affected: Yama checks attach only. Cost: `gdb` / `strace` / `ltrace` / CRIU (`podman container checkpoint`) do not work, not even with sudo: use them in the lab VMs (own kernel; toolbox shares this one). Anti-cheat games need ptrace (none here). One-way until reboot. Undo: `PTRACE_SCOPE=2`, sysctl section, reboot |
 | `auditd_data_disk_full_action`, `auditd_data_retention_admin_space_left_action` | `SUSPEND` | CIS `HALT`/`SINGLE` would stop a laptop when the disk fills |
 | `auditd_data_retention_space_left_action` | `SYSLOG` | no local MTA for `EMAIL` |
 | `auditd_data_retention_max_log_file_action` | keep `ROTATE` | CIS `KEEP_LOGS` has no limit; `/var` also holds `/var/home` |
@@ -126,8 +126,9 @@ compromise: change the password at once (`sudo passwd <user>` works the same day
   keep the file as tested. A new libvirt network: its bridge in `MULLVAD_VM_BRIDGES` and
   in hostfw `if_vm` / `if_trusted`. Undo: `sudo systemctl disable --now kvmlan`.
 - Throwaway browsing VM (browsevm section, 2026-11-12, design: docs/browsevm.md). Not CIS;
-  NIST SP 800-53 SC-44 (detonation chamber), SC-39, CIS Controls v8 Control 9. Goal:
-  random links never reach the daily user's files or the system. A third local user was
+  NIST SP 800-53 SC-44 (detonation chamber), SC-39, CIS Controls v8.1 Control 9. Goal:
+  random links kept away from the daily user's files and the system: an exploit must
+  escape the browser, the guest kernel and QEMU (sVirt) first. A third local user was
   rejected: same kernel, a browser exploit + kernel LPE owns the host.
   Network (step 1): own libvirt network `browse` on `virbr-browse`, not `default`: hostfw
   accepts virbr0 <-> virbr0 (`fwd_vm_cross`, lab VMs talk to each other); `if_vm_iso`
@@ -212,6 +213,16 @@ compromise: change the password at once (`sudo passwd <user>` works the same day
   Host 2026-11-02: args in /proc/cmdline, shuffle `Y`, GRUB password asked on `e` only.
   The halt path itself not tested (a wrong LUKS password only waits, as before: no shell
   on that path anyway). Test idea: `e`, break the `ostree=` path, unlock -> must halt.
+- The older boot entry: `rpm-ostree kargs` makes a new deployment; the one before stays
+  in GRUB with its old args, and booting any entry asks no password. So after every
+  kargs change the older entry boots without the new args (no `rd.shell=0`,
+  `module.sig_enforce=1`, ...) until the next OS update makes a second deployment with
+  them (daily automatic updates: a day or two). Check: `sudo grep -h '^options'
+  /boot/loader/entries/*.conf` -> the same args on every line (host 2026-11-18: both
+  entries). Not done: a GRUB password on booting every entry. It would ask at every
+  boot, it would make the rollback entry (the fix for a broken boot) harder to reach, and
+  it would not stop someone with repeated access: `/boot` is not encrypted, the entries
+  can be edited offline (THREAT_MODEL.md)
 - Source of the kargs ideas: secureblue default kargs (compared 2026-10-30), minus what
   the Fedora kernel config already does. Not taken: `ia32_emulation=0` (Steam),
   `nosmt` (half the cores), `vsyscall=none` (kernel already xonly). `module.sig_enforce`

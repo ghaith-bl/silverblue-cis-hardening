@@ -22,7 +22,8 @@ sudo usermod -aG wheel <daily>                   # accounts: from the admin; the
 sudo sed -i '1{/pam_succeed_if.so user != /d}' /etc/pam.d/gdm-password   # admin in GDM again
 sudo rm /var/lib/AccountsService/users/<admin>   # admin in the GDM list (after a reboot)
 h=$(getent passwd <admin> | cut -d: -f6)         # accounts: admin home lock off (then edit freely;
-sudo chattr -i "$h" "$h"/.config "$h"/.local "$h"/.local/share "$h"/.bash_profile "$h"/.bashrc "$h"/.bash_logout "$h"/.inputrc
+sudo chattr -i "$h" "$h"/{.config,.local,.local/share,.config/systemd,.local/share/systemd,.local/share/flatpak}
+sudo chattr -i "$h"/{.bash_profile,.bashrc,.bash_logout,.inputrc}   # a folder that is not there: one error line, harmless
                                                  # Fedora's files: sudo cp /etc/skel/.bash* "$h"/, chown;
                                                  # removed files: /var/backups/hardening/<ts>$h/)
 sudo rm /etc/dconf/db/gdm.d/90-cis-hardening /etc/dconf/db/gdm.d/locks/90-cis-hardening && sudo dconf update
@@ -89,3 +90,26 @@ sudo ostree admin config-diff                    # every /etc change vs. image d
   sysctl section, reboot.
 - Other sysctls (io_uring, sysrq, limits, mmap bits): edit `90-hardening.conf`,
   `sudo sysctl --system` (no reboot).
+
+## Clock far off (time sync stuck)
+
+NTS checks the time servers' certificates against the local clock (start and end dates).
+A clock far off (RTC battery, wrong firmware time) = every NTS server refused = no sync,
+and the clock stays wrong. The tunnel can fail on the same clock: TLS to the Mullvad API,
+and WireGuard handshakes carry a timestamp. `nocerttimecheck` (chrony: skip the date check
+for the first updates) is not used on purpose: chrony's docs warn about its security
+implications, and it would trust the first answer after every boot. Set the time by hand
+instead, from the admin console:
+
+```bash
+date -u                                          # compare with a trusted device (phone)
+sudo date -u -s 'YYYY-MM-DD HH:MM'               # UTC, from that device (audit key time-change)
+mullvad reconnect                                # tunnel with the right time (group mullvad)
+sudo systemctl restart chronyd                   # makestep 1.0 3: may step in the first 3 updates
+sudo chronyc -N authdata                         # a minute later: Mode NTS, KE > 0
+chronyc tracking                                 # Leap status : Normal, small offset
+```
+
+- Tunnel still down after the fix: a server that saw a later handshake time from this key
+  refuses earlier ones; another server: `mullvad relay set location <country>`.
+- `rtcsync`: the kernel copies the synced time to the RTC (every 11 minutes).

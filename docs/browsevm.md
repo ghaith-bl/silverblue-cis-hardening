@@ -8,12 +8,13 @@ deviations, rollback, verification rows: done (2026-11-17). Viewer relay + sandb
 beta (2026-11-18).
 
 ## Goal
-- random links never reach the daily user's files or the system
+- random links kept away from the daily user's files and the system: an exploit must
+  escape the browser, the guest kernel and QEMU (sVirt, below) first
 - a browser only (Mullvad Browser or Brave, chosen per start), sound on, 4 GiB RAM, CPU
   graphics (no GPU)
 - nothing leaves the VM: no clipboard, no shared folder, no USB, no file export
 - refs: NIST SP 800-53 SC-44 (detonation chambers), SC-39 (process isolation), AC-6;
-  CIS Controls v8 Control 9 (email and web browser protections); Qubes OS disposable VMs
+  CIS Controls v8.1 Control 9 (email and web browser protections); Qubes OS disposable VMs
 
 ## Why a VM, not a third user
 - a third user = DAC on the same kernel: browser exploit + kernel LPE = the whole host
@@ -28,8 +29,9 @@ beta (2026-11-18).
   (managed policies), the host picks per start (two app grid entries). Nothing else
 - disk: base image `/var/lib/libvirt/images/browsevm-base.qcow2`, never the VM's own
   disk. The VM runs on a qcow2 overlay made new at every start, in RAM (tmpfs), gone at
-  stop: every start is clean, downloads / cookies / malware gone at power off and never
-  on the disk. The base is read-only for the VM (SELinux label, below)
+  stop: every start is clean, downloads / cookies / malware gone at power off, not
+  written to the disk itself (tmpfs; its pages may go to swap, below). The base is
+  read-only for the VM (SELinux label, below)
 - updates: a new base built from the kept ISO (`update`, about 10 min, both browsers and
   Fedora at their newest): `browsevm-update.timer` checks daily, rebuilds when the base
   is 7 days old (below)
@@ -201,14 +203,21 @@ sudo DAILY_USER=<daily user> browsevm/browsevm.sh install # again after a change
 Daily user: app grid `browsevm Mullvad` / `browsevm Brave` (or `browsevm [mullvad|brave]`
 in a terminal). Window closed = VM stopped.
 - domain `browsevm` (`browsevm/domain.xml`, copy of what was defined in
-  `/etc/browsevm/domain.xml`): 4 GiB, 2 vCPU, host-passthrough CPU, virtio disk + net,
-  virtio-gpu 1920x1080 (no GL), virtio tablet (pointer without an agent), ich9 sound with
+  `/etc/browsevm/domain.xml`): 4 GiB, 2 vCPU, host-passthrough CPU (below), virtio disk +
+  net, virtio-gpu 1920x1080 (no GL), virtio tablet (pointer without an agent), ich9 sound with
   the output codec only + SPICE audio, virtio rng. `<controller type='usb' model='none'/>`
   (no USB, so no redirection), `<memballoon model='none'/>`, no serial console, no
   channels (vdagent, guest agent), no shares. SPICE: `<clipboard copypaste='no'/>`,
   `<filetransfer enable='no'/>`, image compression off (local socket). `<sysinfo
   type='smbios'><oemStrings><entry>browsevm-browser mullvad</entry>` + `<os><smbios
   mode='sysinfo'/>`: the browser of the next start
+- CPU `host-passthrough` (decision 2026-11-17): QEMU's recommended mode when a VM is never
+  live-migrated. The guest gets the host CPU's mitigation flags (`spec-ctrl`, `md-clear`,
+  `ssbd`, ...) and its kernel uses them: it runs hostile code. Fingerprint: no web API
+  gives the CPU model; the core count is a fixed value in Mullvad Browser and randomized
+  per site and session in Brave. Code that escaped the browser can read the model in the
+  guest (`/proc/cpuinfo`): a CPU type, not this laptop. `host-model` not tested: no gain
+  here
 - disk: `/var/lib/libvirt/browsevm-run/browsevm-run.qcow2`, a qcow2 overlay with the
   base as backing file (`qemu-img create -f qcow2 -F qcow2 -b <base>`) on a tmpfs that
   `browsevm-ctl` mounts at start (`size=2g`, nosuid, nodev, noexec, root directory

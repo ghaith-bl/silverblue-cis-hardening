@@ -32,7 +32,7 @@ checked by hand:
 
 | Count | Kind | Where |
 |------:|------|-------|
-| 56 | deviations on purpose: would break the machine, not useful on a personal laptop, two accounts, values changed on purpose, Fedora's own PAM profile | [docs/deviations.md](docs/deviations.md) |
+| 56 | deviations on purpose: would break the machine, not useful on a personal device, two accounts, values changed on purpose, Fedora's own PAM profile | [docs/deviations.md](docs/deviations.md) |
 | 12 | scanner false positives on Silverblue / Fedora (checks the wrong file or a Debian path, syscalls missing on x86_64, sshd masked) | [docs/deviations.md](docs/deviations.md) |
 | 16 | audit rules loaded, written in another format than the scanner matches | [docs/deviations.md](docs/deviations.md) |
 | 8  | backlog: AIDE (4), CIS crypto-policy module, umask (3) | - |
@@ -154,9 +154,9 @@ sudo ./harden-workstation.sh kargs    # reboot: LUKS unlock, Wi-Fi, VPN, a VM
 | `pam`         | faillock (5 tries -> 15 min), pwhistory (24), pwquality (15 chars, 4 classes, dictionary check), no empty passwords | lockout includes the lock screen |
 | `pwage`       | password max age `PASS_MAX_DAYS`, min age `PASS_MIN_DAYS`, warning `PASS_WARN_AGE` (login.defs + every login account); no lock after expiry | change the password once a year; not twice in one day (root can: `sudo passwd <user>`) |
 | `su`          | `su` limited to the empty group `sugroup` | use `sudo` |
-| `accounts`    | CIS Controls v8 5.4: admin in wheel, hidden from and refused by GDM; daily user out of wheel, `mullvad`, `sectop`; homes 0700. Not CIS: the admin's shell start files from `accounts/` (fixed PATH, no `~/.bashrc.d`), immutable; the top of its home, `.config`, `.local`, `.local/share` (and its systemd / flatpak folders) immutable (nothing new there). Run 2 only from the admin | admin: text console only; its shell files and new files at those levels only after `sudo chattr -i`; daily user: no sudo, no Mullvad CLI |
+| `accounts`    | CIS Controls v8.1 5.4: admin in wheel, hidden from and refused by GDM; daily user out of wheel, `mullvad`, `sectop`; homes 0700. Not CIS: the admin's shell start files from `accounts/` (fixed PATH, no `~/.bashrc.d`), immutable; the top of its home, `.config`, `.local`, `.local/share` (and its systemd / flatpak folders) immutable (nothing new there). Run 2 only from the admin | admin: text console only; its shell files and new files at those levels only after `sudo chattr -i`; daily user: no sudo, no Mullvad CLI |
 | `services`    | mask rpcbind / nfs / avahi, nftables.service | no mDNS |
-| `guesttools`  | CIS Controls v8 4.8: `GUEST_TOOLS` removed from the image (`rpm-ostree override remove`, next boot) when the machine is not a VM and nothing else needs them: one setuid root program (`vmware-user-suid-wrapper`) and three agents started at login less. Their setuid files leave `55-privileged.rules` in the same go | none on real hardware; one reboot |
+| `guesttools`  | CIS Controls v8.1 4.8: `GUEST_TOOLS` removed from the image (`rpm-ostree override remove`, next boot) when the machine is not a VM and nothing else needs them: one setuid root program (`vmware-user-suid-wrapper`) and three agents started at login less. Their setuid files leave `55-privileged.rules` in the same go | none on real hardware; one reboot |
 | `loopback`    | firewalld: `lo` in zone `trusted`, 127.0.0.1 / ::1 as source only toward themselves | none |
 | `cron`        | root-only cron dirs (modes set again at every boot by tmpfiles), `cron.allow` / `at.allow` | crontab: root + the daily user; `at`: root only |
 | `sshd`        | hardened drop-in `40-cis.conf`, server masked | no incoming SSH |
@@ -172,14 +172,14 @@ sudo ./harden-workstation.sh kargs    # reboot: LUKS unlock, Wi-Fi, VPN, a VM
 | `usbguard`    | not CIS: rules from the devices present, CLI root only, `usb-allow-storage`, GNOME usb-protection off. Run twice: start + test, then enable | only known devices work, locked or not; flash drive: `sudo usb-allow-storage` |
 | `appunit`     | not CIS: apps in `APP_UNITS` start as `app-<id>@<pid>.service` (Brave left GNOME Shell's cgroup) | the app in its own unit; after a Brave update run it again |
 | `time`        | chrony: NTS only (Netnod + PTB), `authselectmode require`, `minsources 2`, no pool, no DHCP NTP | no time sync without the tunnel |
-| `autoupdate`  | CIS Controls v8 7.3 / 7.4: `/etc/rpm-ostreed.conf` `AutomaticUpdatePolicy=stage` + `rpm-ostreed-automatic.timer` (OS + layered packages downloaded daily, applied at the next boot); `flatpak-update-system.timer` + global user `flatpak-update-user.timer` (daily); `fwupd-refresh.timer` every second day (firmware metadata only); fwupd reports to LVFS off | updates arrive without asking; reboot to apply the OS one (`rpm-ostree status`); firmware / dbx: `fwupdmgr get-updates`, by hand |
+| `autoupdate`  | CIS Controls v8.1 7.3 / 7.4: `/etc/rpm-ostreed.conf` `AutomaticUpdatePolicy=stage` + `rpm-ostreed-automatic.timer` (OS + layered packages downloaded daily, applied at the next boot); `flatpak-update-system.timer` + global user `flatpak-update-user.timer` (daily); `fwupd-refresh.timer` every second day (firmware metadata only); fwupd reports to LVFS off | updates arrive without asking; reboot to apply the OS one (`rpm-ostree status`); firmware / dbx: `fwupdmgr get-updates`, by hand |
 | `kargs`       | not CIS: `KERNEL_ARGS` via `rpm-ostree kargs` (next boot): AF_ALG off, random page allocator, no initramfs shell, freed memory zeroed, strict IOMMU, hashed pointers, no forced writes through /proc/<pid>/mem, signed modules only, IOMMU on, no debugfs, no writes to mounted block devices | no Adiantum / Serpent / Twofish LUKS, BlueZ mesh, iwd; boot failure halts; no debugfs |
 
 Reasons and costs of every not-CIS choice: [docs/deviations.md](docs/deviations.md).
 
 ## Two accounts
 
-CIS Controls v8 5.4, NIST SP 800-53 AC-6(2): admin work from an account used for nothing
+CIS Controls v8.1 5.4, NIST SP 800-53 AC-6(2): admin work from an account used for nothing
 else. Root stays locked.
 
 | | admin (`ADMIN_USER`) | daily (`DAILY_USER`) |
@@ -191,8 +191,9 @@ else. Root stays locked.
 
 - Repos: the daily user commits and pushes; the admin pulls its own https clones,
   reviews, then installs. The admin never runs code from the daily user's home.
-- Admin home: a script run as the admin cannot hide in its shell. Start files
-  (`.bash_profile`, `.bashrc`, `.bash_logout`, `.inputrc`) = `accounts/admin.*`, immutable,
+- Admin home: a script run as the admin cannot plant anything in its shell (14 tries
+  refused on the host, 2026-11-19). Start files (`.bash_profile`, `.bashrc`,
+  `.bash_logout`, `.inputrc`) = `accounts/admin.*`, immutable,
   PATH only from root-owned dirs; files bash, `/etc/profile.d` or bash-completion would read
   from the home (`.bash_completion`, `.i18n`, ...) removed and cannot come back: the top of
   the home, `.config`, `.local`, `.local/share` are immutable, and so are `.config/systemd`,
