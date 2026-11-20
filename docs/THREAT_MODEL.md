@@ -51,8 +51,8 @@ studying, testing and adding, and this page changes with it.
   a text console; I never type its password in the desktop.
 - **I join a cafe Wi-Fi.** The laptop shows a new random MAC and no real name. Nothing
   goes out except the VPN tunnel, DNS too; new connections from the cafe network are
-  dropped. A network I have never used still needs a manual step from me (IPv6 off, its
-  DNS ignored); making it automatic is planned.
+  dropped. A network I have never used gets the same on its first connect: its DNS is
+  never used, IPv6 goes off within seconds (until then only neighbor discovery leaves).
 - **I browse.** My browsers are hardened, with separate profiles for separate uses.
   A link I do not trust opens in a throwaway VM that is gone when I close it.
 - **A program goes bad.** It cannot attach to other programs to read or change their
@@ -112,7 +112,7 @@ studying, testing and adding, and this page changes with it.
 | the admin password | root locked; admin only on the text console, never typed in the desktop; its shell files locked, so a script I run as the admin cannot plant an alias or a PATH entry for the next sudo (14 tries refused, 2026-11-19); a process it leaves running: open (below) |
 | browser sessions, cookies, saved logins | profiles per use, hardened policies; random links only in browsevm |
 | network identity: real IP, DNS queries, VPN account and keys | VPN lockdown mode + hostfw, DNS only in the tunnel, VPN control for one group only |
-| identifiers: MAC, hostname, DHCP ids, IPv6 addresses, browser fingerprint | netprivacy (random MAC, generic hostname, ids from the random MAC), IPv6 off on Wi-Fi profiles, Mullvad Browser / Tor Browser |
+| identifiers: MAC, hostname, DHCP ids, IPv6 addresses, browser fingerprint | netprivacy (random MAC, generic hostname, ids from the random MAC), IPv6 off on Wi-Fi / cable profiles (a new one on its first connect), Mullvad Browser / Tor Browser |
 | GitHub / SSH keys | in the daily home (0700) |
 | logs (journal, audit) | detection, and at the same time a record of my activity (a G1 cost) |
 
@@ -154,7 +154,7 @@ Tor, Qubes and Tails list the same kind of limits.
 ### Where anonymity ends
 - network: VPN (sites do not see my real IP, the ISP does not see where I go), DNS only
   through the tunnel, a random MAC per network, no hostname or stable DHCP ids, IPv6 off
-  on Wi-Fi profiles, NTS time through the tunnel
+  on Wi-Fi / cable profiles, NTS time through the tunnel
 - browser: fingerprint resistance (Mullvad Browser, Tor Browser), separate profiles per
   identity, browsevm for unknown links
 - device: microphone off (WirePlumber), no camera, location service masked
@@ -185,9 +185,9 @@ Tor, Qubes and Tails list the same kind of limits.
   (browsevm viewer) need them
 - IPv6: hostfw lets only neighbor discovery / MLD out to the LAN (fc00::/7, fe80::/10,
   ff00::/8 dropped; anything else on the uplink is a leak and dropped); new inbound:
-  firewalld drop. The Wi-Fi profiles have IPv6 off (set per profile by hand), the cable
-  profile does not; a new network's profile gets IPv6 (until turned off by hand) and the
-  network's DNS (until netprivacy runs again)
+  firewalld drop. Wi-Fi / cable profiles have IPv6 off; a new network's profile has it on
+  for a few seconds on its first connect (until the netprivacy dispatcher hook turns it
+  off). A network's DNS is never used (NetworkManager hands resolved none)
 - time: the clock audit rule leaves out chronyd (it adjusts the clock all the time); NTS
   needs a roughly right clock: far off = set by hand from a trusted device
   ([rollback.md](rollback.md), "Clock far off"), not `nocerttimecheck`

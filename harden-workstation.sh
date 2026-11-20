@@ -47,6 +47,8 @@ PASS_WARN_AGE=14             # pwage section: warning this many days before
 MAC_MODE="random"            # "random" = new MAC on every connect (Wi-Fi + cable)
                              # "stable-ssid" = same random MAC per Wi-Fi network (Fedora default)
 GENERIC_HOSTNAME="localhost" # hostname every network may see; "" = keep the current one
+UPLINK_IPV6="off"            # netprivacy section: "off" = IPv6 off on every Wi-Fi / cable profile,
+                             # a new network's on its first connect (dispatcher); "keep" = as set
 KERNEL_ARGS=(initcall_blacklist=af_alg_init page_alloc.shuffle=1 rd.shell=0 rd.emergency=halt
              init_on_free=1 iommu.strict=1 hash_pointers=always proc_mem.force_override=never
              module.sig_enforce=1 intel_iommu=on debugfs=off bdev_allow_write_mounted=0)
@@ -1061,13 +1063,29 @@ EOF
 
 # Not CIS: what a network I join can learn about this laptop. No real MAC, no hostname.
 sec_netprivacy() {
-  local ethmac
+  local ethmac v6 hook=/etc/NetworkManager/dispatcher.d/50-netprivacy src
   case $MAC_MODE in
     random)      ethmac=random ;;
     stable-ssid) ethmac=stable ;;
     *) die "MAC_MODE must be random or stable-ssid" ;;
   esac
+  case $UPLINK_IPV6 in
+    off)  v6=disabled ;;
+    keep) v6="" ;;
+    *) die "UPLINK_IPV6 must be off or keep" ;;
+  esac
+  src="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/netprivacy/nm-dispatcher/50-netprivacy"
+  [[ -f $src ]] || die "$src missing (run from the repo)"
   write_file /etc/NetworkManager/conf.d/90-privacy.conf 0644 <<EOF
+[main]
+# DNS only from the tunnel: Mullvad puts its resolver on its own link in systemd-resolved
+# (D-Bus SetLinkDNS), NetworkManager hands resolved none, from no network (DHCP, router
+# advertisement, profile), a new one included. dns=none alone is not enough: with
+# systemd-resolved=true (default) NetworkManager still sends the profile DNS to resolved.
+# /etc/resolv.conf stays resolved's stub (dns=none = rc-manager unmanaged).
+dns=none
+systemd-resolved=false
+
 # Defaults for profiles that leave these properties unset (NetworkManager.conf(5)).
 # dhcp-send-hostname here is not used by NetworkManager 1.56.1 (tested 2026-10-27):
 # set per profile below, plus a generic hostname for profiles made later.
@@ -1099,19 +1117,27 @@ EOF
   # - no DNS servers (static or from DHCP): only the tunnel has one. With a server on the
   #   uplink, resolved falls back to it while the tunnel has none (connect / reconnect)
   #   and queries go out unencrypted (seen 2026-10-31, blocked by hostfw out_dns).
-  #   ignore-auto-dns has no global default in NetworkManager.conf(5): per profile only.
+  #   ignore-auto-dns has no global default in NetworkManager.conf(5): per profile only
+  #   (dns=none above already keeps them out of resolved: belt and braces).
+  # - IPv6 off (UPLINK_IPV6=off): ipv6.method has no global default either. Fewer
+  #   packets on the LAN (router solicitations, DHCPv6), no IPv6 address from it.
   backup /etc/NetworkManager/system-connections
   local uuid type n=0
+  local -a v6arg=()
+  [[ -z $v6 ]] || v6arg=(ipv6.method "$v6")
   while IFS=: read -r uuid type; do
     case $type in 802-11-wireless|802-3-ethernet) ;; *) continue ;; esac
     if nmcli connection modify "$uuid" ipv4.dhcp-send-hostname no ipv6.dhcp-send-hostname no \
-         ipv4.dns "" ipv4.ignore-auto-dns yes ipv6.dns "" ipv6.ignore-auto-dns yes; then
+         ipv4.dns "" ipv4.ignore-auto-dns yes ipv6.dns "" ipv6.ignore-auto-dns yes "${v6arg[@]}"; then
       n=$((n + 1))
     else
       warn "profile $uuid: not changed"
     fi
   done < <(nmcli -g UUID,TYPE connection show)
-  log "no hostname in DHCP, no DNS servers on $n Wi-Fi / cable profiles"
+  log "no hostname in DHCP, no DNS servers${v6:+, IPv6 $v6} on $n Wi-Fi / cable profiles"
+  # profiles made later (a new network): the same on their first connect (dispatcher hook,
+  # input = profile uuid only). The hostname: the generic one covers the first DHCP.
+  sed "s/^IPV6_METHOD=[a-z]*/IPV6_METHOD=${v6}/" "$src" | write_file "$hook" 0755
   # live connections: reapply (no reconnect, same MAC and lease)
   local dev state
   while IFS=: read -r dev type state; do
@@ -1119,8 +1145,8 @@ EOF
     [[ $state == connected ]] || continue
     if nmcli device reapply "$dev" >/dev/null; then log "reapplied $dev"; else warn "reapply $dev failed - reconnect it"; fi
   done < <(nmcli -g DEVICE,TYPE,STATE device)
-  log "a network joined later gets DHCP DNS again: run netprivacy after joining it"
-  # profiles made later (a new network) send the hostname on their first connect
+  # profiles made later send the hostname on their first connect (NetworkManager 1.56.1
+  # ignores the global dhcp-send-hostname default): a generic hostname
   if [[ -n $GENERIC_HOSTNAME ]]; then
     hostnamectl set-hostname --static "$GENERIC_HOSTNAME"
     hostnamectl set-hostname --pretty ""     # pretty name = Bluetooth / GNOME device name

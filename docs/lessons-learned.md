@@ -113,6 +113,14 @@
   still sent after reload and reboot; `nmcli con modify <uuid> ipv4.dhcp-send-hostname no`
   works (tcpdump, 2026-10-27; upstream issue NetworkManager#584 open). A new network gets
   a new profile with -1: only a generic hostname covers its first connect.
+- NetworkManager.conf `dns=none` stops only the main DNS plugin: `[main]
+  systemd-resolved` (default true) still sends every profile's DNS to systemd-resolved.
+  No network DNS in resolved = both `dns=none` and `systemd-resolved=false`
+  (NetworkManager.conf(5), 2026-11-20). Mullvad is not affected: it sets its resolver on
+  its own link through resolved's D-Bus API (SetLinkDNS), not through NetworkManager.
+- No global default for `ipv6.method` or `ignore-auto-dns` in NetworkManager.conf: a
+  new profile is `auto` / takes the network's DNS. A dispatcher script on `up` can fix
+  the profile and `nmcli device reapply` it (netprivacy hook, 2026-11-20).
 - Hostname `localhost`: NetworkManager sends no hostname option at all, even with -1
   (tcpdump, 2026-10-27). systemd counts static `localhost` as unset, so `hostnamectl`
   showed `Transient hostname: fedora` (fallback from os-release) while the kernel name

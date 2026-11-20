@@ -23,6 +23,7 @@ jobs:
           shellcheck --version | head -2
           tools/lint.sh
 
-      # browsevm viewer relay (beta): bytes / fds in order, busy compositor, limits
+      # browsevm viewer relay (beta): bytes / fds in order, busy compositor, limits;
+      # netprivacy dispatcher hook with a fake nmcli: new profile fixed, others untouched
       - name: tests (python3 -m unittest)
         run: python3 -I -B -m unittest discover -s tests -v

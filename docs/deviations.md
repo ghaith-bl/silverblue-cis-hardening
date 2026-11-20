@@ -103,8 +103,13 @@ compromise: change the password at once (`sudo passwd <user>` works the same day
 - No DNS servers on Wi-Fi / cable profiles (netprivacy, 2026-10-31). Problem: 2 profiles
   had a static public resolver; resolved used it while the tunnel had no DNS (reconnect):
   20 queries uid 990 out of the tunnel, blocked by hostfw (`out_dns`), not a leak.
-  Cost: no DNS without the tunnel (captive portals: already closed by lockdown). New
-  networks get DHCP DNS: run netprivacy again.
+  Cost: no DNS without the tunnel (captive portals: already closed by lockdown).
+  New networks (2026-11-20): NetworkManager hands systemd-resolved no DNS at all
+  (`dns=none` + `systemd-resolved=false` in 90-privacy.conf; `dns=none` alone still sends
+  profile DNS to resolved, NetworkManager.conf(5)); Mullvad sets its resolver on its own
+  link itself. A dispatcher hook clears DNS / hostname fields and turns IPv6 off in a new
+  Wi-Fi / cable profile on its first connect (input: profile uuid only). Cost: no IPv6 on
+  any uplink (`UPLINK_IPV6=keep` to leave it).
 - hostfw: enforce from boot, out_noscope (GNOME Shell's cgroup) enforce too. Observe
   findings and history: firewall/docs/observe-log.md.
 - VMs with Allow LAN off (kvmlan section, 2026-11-04). Problem: Mullvad's LAN block also

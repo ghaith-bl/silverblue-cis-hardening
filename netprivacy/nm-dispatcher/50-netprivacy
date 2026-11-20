@@ -1,0 +1,39 @@
+#!/bin/sh
+# NetworkManager dispatcher: a Wi-Fi / cable profile that comes up gets what netprivacy
+# sets on the profiles it finds: no DNS servers (static or from DHCP), no hostname in
+# DHCP, IPv6 off (UPLINK_IPV6=off). A new network = a new profile: fixed on its first
+# connect, then reapplied (same MAC and lease, no reconnect).
+# Input: the profile uuid and the interface name only, never the network name (SSID).
+# DNS: NetworkManager hands no DNS to systemd-resolved at all (90-privacy.conf dns=none,
+# systemd-resolved=false); the profile fields only keep the profile clean.
+# IPv6 until the reapply (a few seconds): hostfw lets only NDP / MLD out to the LAN.
+# installed to /etc/NetworkManager/dispatcher.d/ by: harden-workstation.sh netprivacy
+IPV6_METHOD=disabled   # netprivacy writes it from UPLINK_IPV6: off = disabled, keep = empty
+
+[ "$2" = up ] || exit 0
+dev=$1
+uuid=${CONNECTION_UUID:-}
+case $uuid in ''|*[!0-9a-f-]*) exit 0 ;; esac
+[ -n "$dev" ] || exit 0
+
+log() { logger -t netprivacy-dispatcher -p daemon.info "$*"; }
+
+type=$(nmcli -g connection.type connection show "$uuid" 2>/dev/null) || exit 0
+case $type in 802-11-wireless|802-3-ethernet) ;; *) exit 0 ;; esac
+
+f=ipv4.dns,ipv4.ignore-auto-dns,ipv6.dns,ipv6.ignore-auto-dns,ipv4.dhcp-send-hostname,ipv6.dhcp-send-hostname,ipv6.method
+before=$(nmcli -g "$f" connection show "$uuid" 2>/dev/null) || exit 0
+set -- ipv4.dns "" ipv4.ignore-auto-dns yes ipv6.dns "" ipv6.ignore-auto-dns yes \
+       ipv4.dhcp-send-hostname no ipv6.dhcp-send-hostname no
+[ -z "$IPV6_METHOD" ] || set -- "$@" ipv6.method "$IPV6_METHOD"
+if ! nmcli connection modify "$uuid" "$@" 2>/dev/null; then
+  log "profile $uuid: not changed (nmcli modify failed)"; exit 0
+fi
+after=$(nmcli -g "$f" connection show "$uuid" 2>/dev/null) || exit 0
+[ "$before" != "$after" ] || exit 0
+if nmcli device reapply "$dev" >/dev/null 2>&1; then
+  log "profile $uuid: no DNS, no hostname in DHCP${IPV6_METHOD:+, IPv6 $IPV6_METHOD}; reapplied $dev"
+else
+  log "profile $uuid: changed, reapply on $dev failed: reconnect it"
+fi
+exit 0

@@ -108,6 +108,9 @@ Tests run after hardening + reboot. All passed.
 | hostname from boot | `journalctl -b -o short-monotonic \| grep 'Hostname set to'`; `grep -o 'SYSTEMD_DEFAULT_HOSTNAME=[^ ]*' /proc/cmdline` | `<localhost>` only (first line < 1 s, initramfs); the arg |
 | LLMNR / mDNS off | `resolvectl status \| grep -E 'LLMNR\|mDNS'` | only `-LLMNR -mDNS` |
 | DNS only in the tunnel | `resolvectl dns`; `resolvectl status \| grep -ci fallback` | a server on `wg0-mullvad` only; `0` |
+| no network DNS to resolved | `NetworkManager --print-config \| grep -E '^(dns\|systemd-resolved)='` | `dns=none`, `systemd-resolved=false` |
+| IPv6 off in profiles | `for u in $(nmcli -g UUID,TYPE con show \| awk -F: '$2~/wireless\|ethernet/{print $1}'); do nmcli -g ipv6.method con show "$u"; done` | `disabled` per profile (`UPLINK_IPV6=off`) |
+| new network (dispatcher hook) | `ls -l /etc/NetworkManager/dispatcher.d/50-netprivacy`; on the active Wi-Fi: `sudo nmcli con modify <uuid> ipv6.method auto ipv4.ignore-auto-dns no ipv6.ignore-auto-dns no ipv4.dhcp-send-hostname -1`, reconnect, `resolvectl dns`, after 10 s the same profile fields; `journalctl -b -t netprivacy-dispatcher`; `sudo ausearch -m avc -ts recent` | root 0755; DNS on `wg0-mullvad` only (also during the connect); `disabled`, `yes`, `0` again; one line `no DNS, no hostname in DHCP, IPv6 disabled; reapplied`; no AVC |
 | no DNS in profiles | `for u in $(nmcli -g UUID,TYPE con show \| awk -F: '$2~/wireless\|ethernet/{print $1}'); do nmcli -g ipv4.dns,ipv4.ignore-auto-dns,ipv6.dns,ipv6.ignore-auto-dns con show "$u" \| paste -sd' '; done` | ` yes  yes` per profile |
 | time: NTS only | `chronyc -N authdata` (sudo if denied); `chronyc -n sources` | 5 servers, Mode `NTS`, KE / Cook > 0; `^*` on one of them |
 | time: synced | `chronyc tracking` | `Leap status : Normal`, small `System time` offset |

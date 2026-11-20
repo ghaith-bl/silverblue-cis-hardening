@@ -13,7 +13,10 @@ sudo rpm-ostree override reset open-vm-tools-desktop open-vm-tools spice-vdagent
 sudo rm /etc/wireplumber/wireplumber.conf.d/90-disable-mic.conf
 systemctl --user restart wireplumber
 sudo rm /etc/NetworkManager/conf.d/90-privacy.conf /etc/systemd/resolved.conf.d/90-privacy.conf
+sudo rm /etc/NetworkManager/dispatcher.d/50-netprivacy   # new networks keep what they get
 sudo systemctl reload NetworkManager systemd-resolved   # then reconnect
+sudo nmcli con modify <uuid> ipv6.method auto          # IPv6 back on a profile; with the hook kept:
+                                                 # UPLINK_IPV6=keep + netprivacy first, else it goes off again
 sudo rm -r /etc/systemd/system/systemd-hostnamed.service.d && sudo systemctl daemon-reload
 sudo rpm-ostree kargs --delete=SYSTEMD_DEFAULT_HOSTNAME=localhost   # then reboot
 sudo hostnamectl set-hostname <name>             # per profile: nmcli con modify <uuid> ipv4.dhcp-send-hostname -1
