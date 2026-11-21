@@ -69,6 +69,8 @@ Tests run after hardening + reboot. All passed.
 
 | Check | Command | Expected |
 |-------|---------|----------|
+| second run changes nothing | the same sections again (`sudo ADMIN_USER=<admin> DAILY_USER=<daily> ./harden-workstation.sh <sections>`) | `no change` per section, summary `Backups: none`, no new folder in `/var/backups/hardening/` |
+| a failed command is reported | (sandbox / VM) a section with a missing tool, e.g. no `ip` for `browsevm` | `STOP: section browsevm, sec_browsevm line N, exit 127: have=$(ip ...)`, summary: stopped section, `not run:` list |
 | audit rules loaded | `sudo auditctl -l \| wc -l` | 73 (this host 2026-11-17: 47 + one per setuid program; changes with the setuid list) |
 | setuid / setgid audited | `sudo auditctl -l \| grep -c 'key=privileged'` | `find /usr -xdev -type f \( -perm -4000 -o -perm -2000 \) \| wc -l` (the same number; 26 on 2026-11-17, after `guesttools`) |
 | guesttools | `rpm-ostree status --booted --json \| grep -A5 requested-base-removals`; `rpm -q open-vm-tools open-vm-tools-desktop spice-vdagent`; `ls /etc/xdg/autostart \| grep -iE 'vmware\|vbox\|spice'` | the three names listed; `not installed` each; no autostart file |

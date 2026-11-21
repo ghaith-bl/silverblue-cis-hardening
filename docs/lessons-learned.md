@@ -140,6 +140,21 @@
   although the line was there. Seen 2026-11-05 in a host script (`2-hostfw-split.sh`).
   Use `cmd | grep x >/dev/null` (grep reads to the end) or test in the shell
   (`[[ " $(id -nG u) " == *" g "* ]]`). Same for `| head` when the status matters.
+- `set -e` ends a script without a word when a command inside `x=$(...)` fails and its
+  stderr goes to /dev/null: `have=$(ip -4 addr ... 2>/dev/null | awk ...)` with no `ip`
+  (exit 127, the "command not found" line is in the /dev/null too). Seen in the sandbox in
+  `sec_browsevm`. `set -E` + `trap '... $LINENO "$BASH_COMMAND"' ERR` names the line. The
+  trap runs again in the subshell of `$(...)` / a pipe part (with `set -E`): report only at
+  `BASH_SUBSHELL == 0`; the subshell's command is the last of the pipe, not the failed one.
+- ERR trap and `set -e` skip the same places: `if` / `while` conditions, `a || b`, `!`, and
+  everything inside a function called there. The last command of a function is its exit
+  status: `systemctl restart x && log ...` as the last line fails the caller when the restart
+  fails.
+- Change detection by file: a variable set in a function that runs as a pipe part
+  (`{ ... } | write_file`) is lost with the subshell; append to a file instead.
+- `rpm -ql` lists links next to files (`/usr/bin/vmware-user` -> the setuid wrapper, the
+  `/usr/lib/.build-id/` links) and `[[ -u $f ]]` follows links: test `! -L` first (the
+  guesttools log named three files for one setuid program).
 
 ## sysctl
 

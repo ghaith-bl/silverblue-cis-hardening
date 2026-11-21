@@ -10,7 +10,9 @@
 #   sudo ./harden-workstation.sh all               run every section
 #
 # Every file this script replaces is copied first to:
-#   /var/backups/hardening/<timestamp>/<original path>
+#   /var/backups/hardening/<timestamp>/<original path>   (no folder when nothing changed)
+# Each section ends with its changes or "no change"; a second run: no change anywhere.
+# A failed command stops the run: section, line, command, then the summary.
 #
 # Deliberately NOT applied (would break this machine):
 #   - overlay module blacklist  -> Silverblue composefs, podman/toolbox
@@ -21,7 +23,7 @@
 #   - auditd HALT               -> a full disk would halt the laptop
 #   - auditd KEEP_LOGS          -> no limit, /var also holds /var/home (ROTATE, 40 x 32 MiB)
 # =============================================================================
-set -euo pipefail
+set -Eeuo pipefail
 
 # -----------------------------------------------------------------------------
 # Decisions - review before running
@@ -93,8 +95,13 @@ else
   TARGET_USER="${SUDO_USER:-}"
 fi
 
+# created by the first backup of a run only: a run that replaces nothing leaves no folder
 BACKUP_ROOT="/var/backups/hardening/$(date +%Y%m%d-%H%M%S)"
 SECTIONS=(sysctl modules coredump journald gnome sudo pam pwage su accounts services guesttools loopback cron sshd auditd audit-rules perms mic netprivacy mullvad kvmlan browsevm svirt usbguard appunit time autoupdate kargs)
+CUR_SECTION=""      # the section running now (error report, change list)
+CHANGE_LOG=""       # file: one line "<section> TAB <what>" per change (pipelines run
+                    # functions in a subshell: a variable would lose their changes)
+DONE_SECTIONS=()    # sections run to the end
 
 # -----------------------------------------------------------------------------
 # Helpers
@@ -103,9 +110,27 @@ log()  { printf '\e[32m[+]\e[0m %s\n' "$*"; }
 warn() { printf '\e[33m[!]\e[0m %s\n' "$*" >&2; }
 die()  { printf '\e[31m[x]\e[0m %s\n' "$*" >&2; exit 1; }
 
+# changed <what>: one change on this machine by the running section (file content, mode,
+# unit state, account, firewall / profile setting, kernel arg). Reloads and restarts that
+# follow a change are not counted. Second run on the same machine: no change anywhere.
+changed() {
+  [[ -n $CHANGE_LOG ]] || return 0
+  printf '%s\t%s\n' "${CUR_SECTION:--}" "$*" >> "$CHANGE_LOG"
+}
+
+# section_changes [section]: number of changes of that section (default: the running one;
+# the same change twice, e.g. two keys of one file, counts once)
+section_changes() {
+  [[ -n $CHANGE_LOG && -f $CHANGE_LOG ]] || { echo 0; return 0; }
+  awk -F '\t' -v s="${1:-$CUR_SECTION}" '$1 == s && !seen[$0]++ { n++ } END { print n + 0 }' "$CHANGE_LOG"
+}
+
+# backup <path>...: copy to BACKUP_ROOT before a change; the first copy of a run stays
+# (a second change of the same file in one run keeps the original)
 backup() {
   local f
   for f in "$@"; do
+    [[ -e "${BACKUP_ROOT}${f}" || -L "${BACKUP_ROOT}${f}" ]] && continue
     if [[ -e "$f" || -L "$f" ]]; then
       mkdir -p "${BACKUP_ROOT}$(dirname "$f")"
       cp -a "$f" "${BACKUP_ROOT}${f}"
@@ -113,26 +138,74 @@ backup() {
   done
 }
 
-# write_file <path> <mode>   (content comes from stdin)
+# same_mode <path> <mode>: octal mode of the file is <mode>
+same_mode() { [[ $(( 8#$(stat -c %a "$1") )) -eq $(( 8#$2 )) ]]; }
+
+# write_file <path> <mode>   (content comes from stdin). Same content: file not touched
+# (mode set when it differs), no backup, no change
 write_file() {
-  local path="$1" mode="$2"
+  local path="$1" mode="$2" tmp
+  tmp=$(mktemp)
+  cat > "$tmp"
+  if [[ -f $path && ! -L $path ]] && cmp -s "$tmp" "$path"; then
+    rm -f "$tmp"
+    if ! same_mode "$path" "$mode"; then
+      chmod "$mode" "$path"; log "$path -> $mode"; changed "$path mode $mode"
+    fi
+    return 0
+  fi
   backup "$path"
   mkdir -p "$(dirname "$path")"
-  cat > "$path"
+  cat "$tmp" > "$path"
+  rm -f "$tmp"
   chmod "$mode" "$path"
   restorecon -F "$path" 2>/dev/null || true
   log "wrote $path"
+  changed "$path"
+}
+
+# commit_file <path> <tmp>: <tmp> = new content of <path>. Differs: backup, written in
+# place (owner, mode and label of an existing file stay), change. <tmp> removed
+commit_file() {
+  local path="$1" tmp="$2"
+  if [[ -f $path ]] && cmp -s "$tmp" "$path"; then rm -f "$tmp"; return 0; fi
+  backup "$path"
+  cat "$tmp" > "$path"
+  rm -f "$tmp"
+  restorecon -F "$path" 2>/dev/null || true
+  changed "$path"
 }
 
 # set_kv <file> <key> <value>   ->   "key = value" (replaces commented or existing line)
 set_kv() {
-  local file="$1" key="$2" val="$3"
-  if grep -Eq "^[#[:space:]]*${key}[[:space:]]*=" "$file" 2>/dev/null; then
-    sed -i -E "s|^[#[:space:]]*${key}[[:space:]]*=.*|${key} = ${val}|" "$file"
+  local file="$1" key="$2" val="$3" tmp
+  tmp=$(mktemp)
+  if [[ -f $file ]]; then cat "$file" > "$tmp"; fi
+  if grep -Eq "^[#[:space:]]*${key}[[:space:]]*=" "$tmp"; then
+    sed -i -E "s|^[#[:space:]]*${key}[[:space:]]*=.*|${key} = ${val}|" "$tmp"
   else
-    printf '%s = %s\n' "$key" "$val" >> "$file"
+    printf '%s = %s\n' "$key" "$val" >> "$tmp"
   fi
-  restorecon -F "$file" 2>/dev/null || true
+  commit_file "$file" "$tmp"
+}
+
+# set_mode <mode> <path>...: only where it differs
+set_mode() {
+  local mode="$1" f
+  shift
+  for f in "$@"; do
+    if ! same_mode "$f" "$mode"; then chmod "$mode" "$f"; changed "$f mode $mode"; fi
+  done
+}
+
+# set_owner_mode <owner:group> <mode> <path>...: only where it differs
+set_owner_mode() {
+  local own="$1" mode="$2" f
+  shift 2
+  for f in "$@"; do
+    if [[ $(stat -c %U:%G "$f") != "$own" ]]; then chown "$own" "$f"; changed "$f owner $own"; fi
+    if ! same_mode "$f" "$mode"; then chmod "$mode" "$f"; changed "$f mode $mode"; fi
+  done
 }
 
 unit_exists() { systemctl list-unit-files --no-legend "$1" 2>/dev/null | grep . >/dev/null; }
@@ -140,13 +213,32 @@ unit_exists() { systemctl list-unit-files --no-legend "$1" 2>/dev/null | grep . 
 # SIGPIPE and the pipe fails although the line was there (docs/lessons-learned.md)
 in_group() { [[ " $(id -nG "$1" 2>/dev/null) " == *" $2 "* ]]; }
 
+# unit_state <unit>: systemctl is-enabled output (masked, enabled, disabled, static, ...)
+unit_state() { systemctl is-enabled "$1" 2>/dev/null || true; }
+
 mask_units() {
   local u
   for u in "$@"; do
     if unit_exists "$u"; then
-      if systemctl mask --now "$u" >/dev/null 2>&1; then log "masked $u"; else warn "could not mask $u"; fi
+      if [[ $(unit_state "$u") == masked* ]] && ! systemctl is-active -q "$u"; then continue; fi
+      if systemctl mask --now "$u" >/dev/null 2>&1; then log "masked $u"; changed "masked $u"
+      else warn "could not mask $u"; fi
     fi
   done
+}
+
+# enable_unit <unit> [now]: enabled (and started with now) unless it is already
+enable_unit() {
+  local u="$1" now="${2:-}"
+  if [[ $(unit_state "$u") != enabled ]]; then
+    systemctl enable "$u" >/dev/null 2>&1 || return 1
+    changed "enabled $u"
+  fi
+  if [[ $now == now ]] && ! systemctl is-active -q "$u"; then
+    systemctl start "$u" >/dev/null 2>&1 || return 1
+    changed "started $u"
+  fi
+  return 0
 }
 
 user_home() { getent passwd "$1" | cut -d: -f6; }
@@ -170,6 +262,7 @@ add_karg() {
   (( ${#missing[@]} )) || return 0
   if rpm-ostree kargs "${missing[@]}" >/dev/null; then
     log "kernel args added (used from the next boot): ${missing[*]#--append=}"
+    changed "kernel args ${missing[*]#--append=}"
   else
     warn "rpm-ostree kargs ${missing[*]} failed"
   fi
@@ -272,11 +365,11 @@ EOF
   write_file /etc/security/limits.d/90-cis-coredump.conf 0644 <<'EOF'
 *    hard    core    0
 EOF
-  systemctl daemon-reload
+  (( $(section_changes) == 0 )) || systemctl daemon-reload
 }
 
 sec_journald() {
-  local main=/etc/systemd/journald.conf
+  local main=/etc/systemd/journald.conf tmp
   write_file /etc/systemd/journald.conf.d/90-cis.conf 0644 <<'EOF'
 [Journal]
 Storage=persistent
@@ -292,12 +385,15 @@ EOF
 ForwardToSyslog=no
 EOF
   elif grep -Eq '^[#[:space:]]*ForwardToSyslog=' "$main"; then
-    backup "$main"
-    sed -i -E 's/^[#[:space:]]*ForwardToSyslog=.*/ForwardToSyslog=no/' "$main" && log "$main: ForwardToSyslog=no"
+    tmp=$(mktemp)
+    sed -E 's/^[#[:space:]]*ForwardToSyslog=.*/ForwardToSyslog=no/' "$main" > "$tmp"
+    commit_file "$main" "$tmp"
   else
     warn "$main has no ForwardToSyslog line: add ForwardToSyslog=no under [Journal] by hand"
   fi
-  systemctl restart systemd-journald && log "journald restarted"
+  if (( $(section_changes) )); then
+    if systemctl restart systemd-journald; then log "journald restarted"; else warn "restart journald failed"; fi
+  fi
 }
 
 sec_gnome() {
@@ -360,7 +456,10 @@ EOF
   else
     warn "gdm dconf profile not found - login user list and GDM login methods left as they are"
   fi
-  dconf update && log "dconf databases updated (log out/in to see changes)"
+  if (( $(section_changes) )); then
+    if dconf update; then log "dconf databases updated (log out/in to see changes)"
+    else warn "dconf update failed - run: sudo dconf update"; fi
+  fi
 }
 
 sec_sudo() {
@@ -384,29 +483,34 @@ EOF
 }
 
 sec_pam() {
-  local profile feat
+  local profile feat current
+
   if ! authselect check >/dev/null 2>&1; then
     warn "authselect reports manual PAM edits - skipping PAM section"
     return 0
   fi
-  profile=$(authselect current --raw | awk '{print $1}')
-  if authselect current --raw | grep -w with-fingerprint >/dev/null; then
+  current=" $(authselect current --raw) "
+  profile=${current# }; profile=${profile%% *}
+  if [[ $current == *" with-fingerprint "* ]]; then
     if [[ $FINGERPRINT == disable ]]; then
-      authselect disable-feature with-fingerprint >/dev/null && log "authselect: disabled with-fingerprint"
+      authselect disable-feature with-fingerprint >/dev/null
+      log "authselect: disabled with-fingerprint"; changed "authselect -with-fingerprint"
     else
       warn "with-fingerprint is enabled: failed fingerprint reads can count toward faillock lockouts"
     fi
   fi
   for feat in with-faillock with-pwhistory without-nullok; do
-    if authselect list-features "$profile" | grep -x "$feat" >/dev/null; then
-      authselect enable-feature "$feat" >/dev/null && log "authselect: enabled $feat"
+    if [[ $current == *" $feat "* ]]; then
+      continue
+    elif authselect list-features "$profile" | grep -x "$feat" >/dev/null; then
+      authselect enable-feature "$feat" >/dev/null
+      log "authselect: enabled $feat"; changed "authselect +$feat"
     else
       warn "authselect profile '$profile' has no feature '$feat'"
     fi
   done
-  authselect apply-changes >/dev/null
+  if (( $(section_changes) )); then authselect apply-changes >/dev/null; fi
 
-  backup /etc/security/faillock.conf /etc/security/pwhistory.conf
   set_kv /etc/security/faillock.conf deny 5
   set_kv /etc/security/faillock.conf fail_interval 900
   set_kv /etc/security/faillock.conf unlock_time 900
@@ -416,14 +520,16 @@ sec_pam() {
   # Written to the main pwquality.conf (the scanner only checks that file). minlen 15: NIST
   # SP 800-63B-4 minimum for a password used alone (CIS: 14); minclass 4: CIS (deviations.md)
   local pq=/etc/security/pwquality.conf kv
-  backup "$pq"
   for kv in minlen=15 minclass=4 difok=2 maxrepeat=3 maxsequence=3 dictcheck=1; do
     set_kv "$pq" "${kv%%=*}" "${kv#*=}"
   done
-  grep -qx 'enforce_for_root' "$pq" || echo 'enforce_for_root' >> "$pq"
+  if ! grep -qx 'enforce_for_root' "$pq"; then
+    backup "$pq"; echo 'enforce_for_root' >> "$pq"; changed "$pq enforce_for_root"
+  fi
   if [[ -e /etc/security/pwquality.conf.d/90-cis.conf ]]; then
     backup /etc/security/pwquality.conf.d/90-cis.conf
     rm -f /etc/security/pwquality.conf.d/90-cis.conf
+    changed "removed /etc/security/pwquality.conf.d/90-cis.conf"
   fi
   log "pwquality: min 15 chars, 4 character classes, dictionary check"
 }
@@ -434,39 +540,46 @@ sec_pam() {
 ## an expired + locked admin = no sudo. An account whose password would expire within the
 ## warning days is skipped: change that password first, then run the section again.
 sec_pwage() {
-  local defs=/etc/login.defs u uid shell hash last today kv
+  local defs=/etc/login.defs u uid shell hash last min max warnd today kv tmp
   for kv in "$PASS_MAX_DAYS" "$PASS_MIN_DAYS" "$PASS_WARN_AGE"; do
     [[ $kv =~ ^(0|[1-9][0-9]{0,4})$ ]] || die "PASS_MAX_DAYS, PASS_MIN_DAYS, PASS_WARN_AGE: whole numbers"
   done
   (( PASS_MIN_DAYS < PASS_MAX_DAYS - PASS_WARN_AGE )) ||
     die "PASS_MIN_DAYS must be below PASS_MAX_DAYS - PASS_WARN_AGE"
   today=$(( $(date +%s) / 86400 ))
-  backup "$defs"
+  tmp=$(mktemp)
+  cat "$defs" > "$tmp"
   for kv in "PASS_MAX_DAYS $PASS_MAX_DAYS" "PASS_MIN_DAYS $PASS_MIN_DAYS" "PASS_WARN_AGE $PASS_WARN_AGE"; do
-    if grep -Eq "^[[:space:]]*${kv%% *}[[:space:]]" "$defs"; then      # set lines, not comments
-      sed -i -E "s/^[[:space:]]*${kv%% *}[[:space:]].*/${kv%% *}\t${kv#* }/" "$defs"
+    if grep -Eq "^[[:space:]]*${kv%% *}[[:space:]]" "$tmp"; then      # set lines, not comments
+      sed -i -E "s/^[[:space:]]*${kv%% *}[[:space:]].*/${kv%% *}\t${kv#* }/" "$tmp"
     else
-      printf '%s\t%s\n' "${kv%% *}" "${kv#* }" >> "$defs"
+      printf '%s\t%s\n' "${kv%% *}" "${kv#* }" >> "$tmp"
     fi
   done
+  commit_file "$defs" "$tmp"
   log "login.defs: PASS_MAX_DAYS $PASS_MAX_DAYS, PASS_MIN_DAYS $PASS_MIN_DAYS, PASS_WARN_AGE $PASS_WARN_AGE"
   while IFS=: read -r u _ uid _ _ _ shell; do
     (( uid >= 1000 && uid < 60000 )) || continue
     [[ $shell == */nologin || $shell == */false ]] && continue
-    IFS=: read -r _ hash last _ < <(getent shadow "$u")
+    IFS=: read -r _ hash last min max warnd _ < <(getent shadow "$u")
     [[ $hash == [\!\*]* || -z $hash ]] && { log "$u: no usable password - skipped"; continue; }
     if [[ -z $last || $last == 0 ]] || (( today - last >= PASS_MAX_DAYS - PASS_WARN_AGE )); then
       if [[ -z $last || $last == 0 ]]; then last="never"; else last="$(( today - last )) days ago"; fi
       warn "$u: password last changed $last - change it first, skipped"
       continue
     fi
-    chage -M "$PASS_MAX_DAYS" -m "$PASS_MIN_DAYS" -W "$PASS_WARN_AGE" "$u" &&
-      log "$u: max $PASS_MAX_DAYS days, min $PASS_MIN_DAYS, warning $PASS_WARN_AGE (changed $(( today - last )) days ago)"
+    if [[ $max == "$PASS_MAX_DAYS" && $min == "$PASS_MIN_DAYS" && $warnd == "$PASS_WARN_AGE" ]]; then
+      log "$u: max $PASS_MAX_DAYS days, min $PASS_MIN_DAYS, warning $PASS_WARN_AGE already"
+      continue
+    fi
+    chage -M "$PASS_MAX_DAYS" -m "$PASS_MIN_DAYS" -W "$PASS_WARN_AGE" "$u"
+    log "$u: max $PASS_MAX_DAYS days, min $PASS_MIN_DAYS, warning $PASS_WARN_AGE (changed $(( today - last )) days ago)"
+    changed "$u password aging"
   done < <(getent passwd)
 }
 
 sec_su() {
-  groupadd -f sugroup
+  if ! getent group sugroup >/dev/null; then groupadd sugroup; changed "group sugroup"; fi
   if [[ -n "$(getent group sugroup | cut -d: -f4)" ]]; then
     warn "group sugroup has members - su rule not added"
     return 0
@@ -479,6 +592,8 @@ sec_su() {
   sed -i -E '/^auth[[:space:]]+sufficient[[:space:]]+pam_rootok\.so/a auth            required        pam_wheel.so use_uid group=sugroup' /etc/pam.d/su
   if grep -q 'group=sugroup' /etc/pam.d/su; then
     log "su restricted to the empty group sugroup (use sudo instead)"
+    changed "/etc/pam.d/su pam_wheel group=sugroup"
+
   else
     warn "pam_rootok line not found in /etc/pam.d/su - nothing changed"
   fi
@@ -522,10 +637,11 @@ admin_home_lock() {
     [[ -f $src/admin.$f ]] || { warn "missing $src/admin.$f - admin home lock skipped"; return 0; }
   done
 
-  # unlock what an earlier run locked; locked again below
+  # unlock what an earlier run locked; locked again below (change = not locked before)
+  local -A was_locked=()
   for rel in "${ADMIN_RC[@]/#/.}" "${ADMIN_FROZEN[@]}" .; do
     f=$home/$rel
-    if immutable "$f"; then chattr -i -- "$f" || die "chattr -i $f failed"; fi
+    if immutable "$f"; then was_locked[$rel]=1; chattr -i -- "$f" || die "chattr -i $f failed"; fi
   done
 
   for f in "${ADMIN_RC[@]}"; do
@@ -533,10 +649,9 @@ admin_home_lock() {
     backup "$home/.$f"
     install -m 0640 -o "$a" -g "$grp" "$src/admin.$f" "$home/.$f"    # replaces a link too
     restorecon -F "$home/.$f" 2>/dev/null || true
-    log "$home/.$f <- accounts/admin.$f"; n=$((n + 1))
+    log "$home/.$f <- accounts/admin.$f"; n=$((n + 1)); changed "$home/.$f"
   done
-  chown "$a:$grp" "${ADMIN_RC[@]/#/$home/.}"
-  chmod 0640 "${ADMIN_RC[@]/#/$home/.}"
+  set_owner_mode "$a:$grp" 0640 "${ADMIN_RC[@]/#/$home/.}"
   (( n )) || log "admin shell start files: no change"
 
   for rel in "${ADMIN_GONE[@]}"; do
@@ -545,19 +660,29 @@ admin_home_lock() {
     if immutable "$f"; then chattr -i -- "$f" || die "chattr -i $f failed"; fi
     backup "$f"
     rm -f -- "$f"
-    warn "removed $f (read at shell start; copy in $BACKUP_ROOT)"
+    warn "removed $f (read at shell start; copy in $BACKUP_ROOT)"; changed "removed $f"
   done
   # history: bash writes it at logout, it cannot create it once the home is locked
-  [[ -e $home/.bash_history ]] || install -m 0600 -o "$a" -g "$grp" /dev/null "$home/.bash_history"
+  if [[ ! -e $home/.bash_history ]]; then
+    install -m 0600 -o "$a" -g "$grp" /dev/null "$home/.bash_history"; changed "$home/.bash_history"
+  fi
 
   for f in "${ADMIN_RC[@]}"; do
-    chattr +i -- "$home/.$f" || warn "chattr +i $home/.$f failed (filesystem without it?)"
+    if chattr +i -- "$home/.$f"; then
+      [[ -n ${was_locked[.$f]:-} ]] || changed "chattr +i $home/.$f"
+    else
+      warn "chattr +i $home/.$f failed (filesystem without it?)"
+    fi
   done
   for rel in "${ADMIN_FROZEN[@]}" .; do
     f=$home/$rel
     if [[ -L $f ]]; then warn "$f is a link: not locked, look at it"; continue; fi
     [[ -d $f ]] || continue
-    chattr +i -- "$f" || warn "chattr +i $f failed"
+    if chattr +i -- "$f"; then
+      [[ -n ${was_locked[$rel]:-} ]] || changed "chattr +i $f"
+    else
+      warn "chattr +i $f failed"
+    fi
   done
   for rel in "${ADMIN_CODE_DIRS[@]}"; do
     if [[ -e $home/$rel || -L $home/$rel ]]; then
@@ -587,11 +712,11 @@ sec_accounts() {
 
   # --- admin account: wheel, own group, bash
   if id "$a" >/dev/null 2>&1; then
-    in_group "$a" wheel || { usermod -aG wheel "$a"; log "$a added to wheel"; }
+    in_group "$a" wheel || { usermod -aG wheel "$a"; log "$a added to wheel"; changed "$a in wheel"; }
     log "admin $a: $(id "$a")"
   else
     useradd -m -U -G wheel -s /bin/bash -c "admin (text console)" "$a"
-    log "admin $a created (wheel, password locked until set)"
+    log "admin $a created (wheel, password locked until set)"; changed "user $a"
   fi
   as=$(passwd -S "$a" 2>/dev/null | awk '{print $2}')
   if [[ $as != P && $as != PS ]]; then
@@ -608,7 +733,7 @@ sec_accounts() {
     if grep -qx '\[User\]' "$f"; then sed -i '/^\[User\]$/a SystemAccount=true' "$f"
     else printf '[User]\nSystemAccount=true\n' >> "$f"; fi
     chmod 0600 "$f"; restorecon -F "$f" 2>/dev/null || true
-    log "$f: SystemAccount=true added (GDM list: after a reboot)"
+    log "$f: SystemAccount=true added (GDM list: after a reboot)"; changed "$f SystemAccount=true"
   else
     printf '[User]\nSystemAccount=true\n' | write_file "$f" 0600
     log "GDM list: $a hidden after a reboot"
@@ -619,7 +744,7 @@ sec_accounts() {
     backup "$pam"
     sed -i "1i $line" "$pam"
     restorecon -F "$pam" 2>/dev/null || true
-    log "$pam: line 1 refuses $a (GDM password login)"
+    log "$pam: line 1 refuses $a (GDM password login)"; changed "$pam refuses $a"
   else
     warn "$pam missing (no GDM?) - GDM line skipped"
   fi
@@ -630,7 +755,7 @@ sec_accounts() {
     h=$(user_home "$f")
     if [[ $(stat -c %a "$h") != 700 ]]; then
       if immutable "$h"; then chattr -i -- "$h"; fi
-      chmod 0700 "$h" && log "home of $f -> 0700"
+      chmod 0700 "$h"; log "home of $f -> 0700"; changed "$h mode 0700"
     else
       log "home of $f: 0700"
     fi
@@ -651,17 +776,18 @@ sec_accounts() {
   for g in wheel ${MULLVAD_SOCKET_GROUP:+"$MULLVAD_SOCKET_GROUP"}; do
     getent group "$g" >/dev/null || continue
     if [[ $g != wheel ]] && ! in_group "$a" "$g"; then
-      usermod -aG "$g" "$a"; log "$a added to $g"
+      usermod -aG "$g" "$a"; log "$a added to $g"; changed "$a in $g"
     fi
     if in_group "$d" "$g"; then
-      gpasswd -d "$d" "$g" >/dev/null; log "$d removed from $g"
+      gpasswd -d "$d" "$g" >/dev/null; log "$d removed from $g"; changed "$d out of $g"
     fi
   done
   # sectop's reader group: the daily user runs only the user helper (install.sh warns,
   # sysusers never removes a member). Found 2026-11-06: still a member after the split
   if getent group sectop >/dev/null && in_group "$d" sectop; then
-    gpasswd -d "$d" sectop >/dev/null; log "$d removed from sectop"
+    gpasswd -d "$d" sectop >/dev/null; log "$d removed from sectop"; changed "$d out of sectop"
   fi
+
   log "$d: log out (or reboot): running processes keep the old groups"
   log "sectop: from $a: sudo ./install.sh --desktop-user $d"
   log "check: sudo tools/check-accounts.sh $a $d   (0 FAIL)"
@@ -673,9 +799,13 @@ sec_services() {
   if [[ $DISABLE_BLUETOOTH == yes ]]; then mask_units bluetooth.service; fi
   # nftables.service must NOT be stopped live: its stop action flushes the whole
   # ruleset (firewalld, hostfw, Mullvad kill switch). Disable + mask only.
-  if unit_exists nftables.service; then
+  if unit_exists nftables.service && [[ $(unit_state nftables.service) != masked* ]]; then
     systemctl disable nftables.service >/dev/null 2>&1 || true
-    systemctl mask nftables.service >/dev/null 2>&1 && log "nftables.service masked (firewalld manages nftables)"
+    if systemctl mask nftables.service >/dev/null 2>&1; then
+      log "nftables.service masked (firewalld manages nftables)"; changed "masked nftables.service"
+    else
+      warn "could not mask nftables.service"
+    fi
   fi
 }
 
@@ -688,7 +818,8 @@ sec_services() {
 ## Way back: rpm-ostree override reset <package>, then audit-rules after the reboot.
 sec_guesttools() {
   local p f virt removed rules=/etc/audit/rules.d/55-privileged.rules tmp
-  local -a cand=() want=() req=() caps=() gone=() other=()
+  local -a cand=() want=() req=() caps=() gone=() other=() dropped=()
+
   (( ${#GUEST_TOOLS[@]} )) || { log "GUEST_TOOLS empty: guest tools kept"; return 0; }
   command -v rpm-ostree >/dev/null || { warn "no rpm-ostree: remove ${GUEST_TOOLS[*]} with your package manager"; return 0; }
   virt=$(systemd-detect-virt 2>/dev/null || true)
@@ -719,10 +850,12 @@ print(" ".join(d.get("requested-base-removals", [])))' 2>/dev/null; } || true) "
   done
   (( ${#want[@]} )) || return 0
 
-  # their setuid / setgid files (still on disk until the reboot)
+  # their setuid / setgid files (still on disk until the reboot). Files only: rpm -ql also
+  # lists links to them (/usr/bin/vmware-user, /usr/lib/.build-id/...), and -u / -g follow
+  # links; the privileged rules have files only (find -type f, audit-rules section)
   for p in "${want[@]}"; do
     while IFS= read -r f; do
-      if [[ -f $f && ( -u $f || -g $f ) ]]; then gone+=("$f"); fi
+      if [[ -f $f && ! -L $f && ( -u $f || -g $f ) ]]; then gone+=("$f"); fi
     done < <(rpm -ql "$p" 2>/dev/null)
   done
 
@@ -731,18 +864,28 @@ print(" ".join(d.get("requested-base-removals", [])))' 2>/dev/null; } || true) "
   fi
   log "removed from the image, gone at the next boot: ${want[*]}"
   log "way back: rpm-ostree override reset ${want[*]} (then reboot)"
+  changed "rpm-ostree override remove ${want[*]}"
   if (( ${#gone[@]} )); then log "setuid / setgid files with them: ${gone[*]}"; fi
 
   if (( ${#gone[@]} )) && [[ -f $rules ]]; then
-    tmp=$(mktemp)
-    awk -v list="${gone[*]}" '
-      BEGIN { n = split(list, g, " "); for (i = 1; i <= n; i++) drop["path=" g[i]] = 1 }
-      { for (i = 1; i <= NF; i++) if ($i in drop) next; print }' "$rules" > "$tmp"
-    if ! cmp -s "$tmp" "$rules"; then
+    # rules that really go: a file of the list with a path= rule in the file
+    for f in "${gone[@]}"; do
+      if awk -v p="path=$f" '{ for (i = 1; i <= NF; i++) if ($i == p) { found = 1; exit } }
+                            END { exit !found }' "$rules"; then
+        dropped+=("$f")
+      fi
+    done
+    if (( ${#dropped[@]} )); then
+      tmp=$(mktemp)
+      awk -v list="${dropped[*]}" '
+        BEGIN { n = split(list, g, " "); for (i = 1; i <= n; i++) drop["path=" g[i]] = 1 }
+        { for (i = 1; i <= NF; i++) if ($i in drop) next; print }' "$rules" > "$tmp"
       write_file "$rules" 0640 < "$tmp"
-      log "audit: $(grep -c -- '-k privileged' "$rules") privileged rules from the next boot (dropped: ${gone[*]##*/})"
+      rm -f "$tmp"
+      log "audit: $(grep -c -- '-k privileged' "$rules") privileged rules from the next boot (rules dropped: ${dropped[*]})"
+    else
+      log "audit: no privileged rule for those files (nothing to drop)"
     fi
-    rm -f "$tmp"
   fi
 }
 
@@ -757,22 +900,28 @@ sec_loopback() {
   if firewall-cmd --permanent --zone=trusted --query-interface=lo >/dev/null 2>&1; then
     log "lo already in zone trusted"
   else
-    firewall-cmd --permanent --zone=trusted --add-interface=lo >/dev/null && log "lo -> zone trusted"
+    firewall-cmd --permanent --zone=trusted --add-interface=lo >/dev/null
+    log "lo -> zone trusted"; changed "firewalld: lo in zone trusted"
   fi
   for r in "${rules[@]}"; do
     if firewall-cmd --permanent --zone=trusted --query-rich-rule="$r" >/dev/null 2>&1; then
       log "rich rule there: $r"
     else
-      firewall-cmd --permanent --zone=trusted --add-rich-rule="$r" >/dev/null && log "rich rule: $r"
+      firewall-cmd --permanent --zone=trusted --add-rich-rule="$r" >/dev/null
+      log "rich rule: $r"; changed "firewalld: trusted rich rule $r"
     fi
   done
-  firewall-cmd --reload >/dev/null && log "firewalld reloaded"
+  if (( $(section_changes) )); then
+    if firewall-cmd --reload >/dev/null; then log "firewalld reloaded"; else warn "firewall-cmd --reload failed"; fi
+  fi
 }
 
 sec_cron() {
   local f
   for f in /etc/crontab /etc/cron.d /etc/cron.hourly /etc/cron.daily /etc/cron.weekly /etc/cron.monthly /etc/cron.yearly; do
-    if [[ -e $f ]]; then chown root:root "$f"; chmod og-rwx "$f"; fi
+    [[ -e $f ]] || continue
+    if [[ $(stat -c %U:%G "$f") != root:root ]]; then chown root:root "$f"; changed "$f owner root:root"; fi
+    if (( 8#$(stat -c %a "$f") & 8#077 )); then chmod og-rwx "$f"; changed "$f og-rwx"; fi
   done
   # the dirs were back at the image mode 0755 on 2026-11-09 (crontab kept 0600): tmpfiles
   # sets the modes again at every boot ("z": existing paths only)
@@ -785,7 +934,7 @@ z /etc/cron.weekly  0700 root root -
 z /etc/cron.monthly 0700 root root -
 z /etc/cron.yearly  0700 root root -
 EOF
-  if [[ -e /etc/cron.deny ]]; then backup /etc/cron.deny; rm -f /etc/cron.deny; fi
+  if [[ -e /etc/cron.deny ]]; then backup /etc/cron.deny; rm -f /etc/cron.deny; changed "removed /etc/cron.deny"; fi
   if [[ -n $TARGET_USER ]]; then
     printf 'root\n%s\n' "$TARGET_USER" | write_file /etc/cron.allow 0640
   else
@@ -816,7 +965,7 @@ EOF
   if command -v sshd >/dev/null && compgen -G '/etc/ssh/ssh_host_*_key' >/dev/null; then
     if ! sshd -t; then
       rm -f /etc/ssh/sshd_config.d/40-cis.conf
-      warn "sshd -t failed - removed 40-cis.conf"
+      warn "sshd -t failed - removed 40-cis.conf"; changed "removed /etc/ssh/sshd_config.d/40-cis.conf"
     fi
   fi
   # Only the SSH *server* is affected; the ssh client (outgoing connections) is untouched.
@@ -829,7 +978,6 @@ EOF
 
 sec_auditd() {
   local f=/etc/audit/auditd.conf
-  backup "$f"
   set_kv "$f" disk_error_action SYSLOG
   set_kv "$f" space_left_action SYSLOG
   set_kv "$f" admin_space_left_action SUSPEND
@@ -840,14 +988,18 @@ sec_auditd() {
   set_kv "$f" max_log_file_action ROTATE
   set_kv "$f" max_log_file 32
   set_kv "$f" num_logs 40
-  chmod 0640 "$f"
+  set_mode 0640 "$f"
+  if (( $(section_changes) == 0 )); then log "$f: no change"; return 0; fi
   if auditctl --signal reload >/dev/null 2>&1; then log "auditd configuration reloaded"; else warn "reload auditd manually or reboot"; fi
 }
 
 sec_audit_rules() {
   local d=/etc/audit/rules.d n
   # The earlier 50-watch.rules used b64-only rules, which miss 32-bit programs (Steam).
-  if [[ -e $d/50-watch.rules ]]; then backup "$d/50-watch.rules"; rm -f "$d/50-watch.rules"; log "removed old 50-watch.rules (backed up)"; fi
+  if [[ -e $d/50-watch.rules ]]; then
+    backup "$d/50-watch.rules"; rm -f "$d/50-watch.rules"; log "removed old 50-watch.rules (backed up)"
+    changed "removed $d/50-watch.rules"
+  fi
 
   write_file "$d/01-continue.rules" 0640 <<'EOF'
 ## Keep loading the remaining rules if one fails (e.g. a path that does not exist yet)
@@ -960,6 +1112,7 @@ EOF
     printf '## Lock audit rules until reboot\n-e 2\n' | write_file "$d/99-finalize.rules" 0640
   elif [[ -e $d/99-finalize.rules ]]; then
     backup "$d/99-finalize.rules"; rm -f "$d/99-finalize.rules"; log "removed 99-finalize.rules (unlocked from the next boot)"
+    changed "removed $d/99-finalize.rules"
   fi
 
   # Not CIS (2026-11-16): io_uring is off for everyone (sysctl section), so every
@@ -982,16 +1135,24 @@ EOF
 -a always,exit -F arch=b32 -S socket -F a0=38 -k af-alg
 EOF
 
-  chmod 0640 "$d"/*.rules
+  set_mode 0640 "$d"/*.rules
+  # audit.rules (built from rules.d by augenrules, loaded at boot) already up to date and
+  # nothing changed here: no rebuild, no load
+  if (( $(section_changes) == 0 )) && [[ $(augenrules --check 2>&1) == *"No change"* ]]; then
+    log "audit rules: no change (rules.d = /etc/audit/audit.rules)"
+    return 0
+  fi
   if [[ $(auditctl -s | awk '$1 == "enabled" {print $2}') == 2 ]]; then
     # Locked: the kernel refuses every change. Write audit.rules, load it at boot.
     if ! augenrules >/dev/null; then warn "augenrules reported an error - check the files in $d"; fi
+    changed "/etc/audit/audit.rules"
     log "audit rules are locked (-e 2): the new rules load at the next reboot"
     return 0
   fi
   if ! augenrules --load >/dev/null; then
     warn "augenrules reported an error - run: sudo augenrules --load"
   fi
+  changed "/etc/audit/audit.rules (loaded)"
   n=$(auditctl -l | grep -vc '^No rules' || true)
   log "audit rules loaded in kernel: $n"
   if (( n < 40 )); then warn "fewer rules than expected - check the files in $d"; fi
@@ -1000,13 +1161,18 @@ EOF
 
 sec_perms() {
   local home f u
-  chmod 0640 /etc/audit/auditd.conf /etc/audit/audit.rules /etc/audit/rules.d/*.rules 2>/dev/null || true
-  log "audit config files -> 0640"
+  for f in /etc/audit/auditd.conf /etc/audit/audit.rules /etc/audit/rules.d/*.rules; do
+    [[ -f $f ]] || continue
+    if ! same_mode "$f" 0640; then chmod 0640 "$f"; changed "$f mode 0640"; fi
+  done
+  log "audit config files: 0640"
 
   # every file in /boot/grub2 (also the empty marker .grub2-blscfg-supported); tmpfiles sets
   # the known ones again at boot, after a bootloader update wrote them with 0644
   if [[ -d /boot/grub2 ]]; then
-    find /boot/grub2 -maxdepth 1 -type f -perm /0077 -exec chmod go-rwx {} + && log "/boot/grub2 files -> 0600"
+    while IFS= read -r -d '' f; do
+      chmod go-rwx "$f"; log "$f: go-rwx"; changed "$f go-rwx"
+    done < <(find /boot/grub2 -maxdepth 1 -type f -perm /0077 -print0)
   fi
   write_file /etc/tmpfiles.d/90-cis-grub.conf 0644 <<'EOF'
 z /boot/grub2/grub.cfg                0600 root root -
@@ -1018,9 +1184,13 @@ EOF
   for u in "$TARGET_USER" "$ADMIN_USER"; do          # the admin's home too (skel: 0644)
     [[ -n $u ]] && id "$u" >/dev/null 2>&1 || continue
     home=$(user_home "$u")
-    # every dotfile in the home, not only shell rc (the scanner checks .gitconfig too)
-    find "$home" -maxdepth 1 -type f -name '.*' -perm /0037 -exec chmod g-wx,o-rwx {} +
-    log "dotfiles in $home -> 0740 or stricter"
+    # every dotfile in the home, not only shell rc (the scanner checks .gitconfig too);
+    # immutable ones (the admin's shell files, accounts section) are 0640 already
+    while IFS= read -r -d '' f; do
+      if immutable "$f"; then warn "$f: immutable, mode left (chattr -i first)"; continue; fi
+      chmod g-wx,o-rwx "$f"; changed "$f g-wx,o-rwx"
+    done < <(find "$home" -maxdepth 1 -type f -name '.*' -perm /0037 -print0)
+    log "dotfiles in $home: 0740 or stricter"
   done
 }
 
@@ -1054,16 +1224,19 @@ EOF
     fi
   } | write_file "$conf" 0644
 
-  if [[ -n $TARGET_USER ]] && systemctl --user -M "${TARGET_USER}@" restart wireplumber >/dev/null 2>&1; then
+  if (( $(section_changes) == 0 )); then
+    :
+  elif [[ -n $TARGET_USER ]] && systemctl --user -M "${TARGET_USER}@" restart wireplumber >/dev/null 2>&1; then
     log "WirePlumber restarted for $TARGET_USER"
   else
     warn "restart WirePlumber yourself (not with sudo): systemctl --user restart wireplumber"
   fi
 }
 
+
 # Not CIS: what a network I join can learn about this laptop. No real MAC, no hostname.
 sec_netprivacy() {
-  local ethmac v6 hook=/etc/NetworkManager/dispatcher.d/50-netprivacy src
+  local ethmac v6 hook=/etc/NetworkManager/dispatcher.d/50-netprivacy src c0 nm_conf=0 res_conf=0
   case $MAC_MODE in
     random)      ethmac=random ;;
     stable-ssid) ethmac=stable ;;
@@ -1076,6 +1249,7 @@ sec_netprivacy() {
   esac
   src="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/netprivacy/nm-dispatcher/50-netprivacy"
   [[ -f $src ]] || die "$src missing (run from the repo)"
+  c0=$(section_changes)
   write_file /etc/NetworkManager/conf.d/90-privacy.conf 0644 <<EOF
 [main]
 # DNS only from the tunnel: Mullvad puts its resolver on its own link in systemd-resolved
@@ -1105,13 +1279,18 @@ ipv4.dhcp-client-id=mac
 ipv6.dhcp-duid=ll
 ipv6.ip6-privacy=2
 EOF
+  (( $(section_changes) == c0 )) || nm_conf=1
   # LLMNR / mDNS answer and announce the hostname on the LAN (avahi: services section)
+  c0=$(section_changes)
   write_file /etc/systemd/resolved.conf.d/90-privacy.conf 0644 <<'EOF'
 [Resolve]
 LLMNR=no
 MulticastDNS=no
 EOF
-  if systemctl reload NetworkManager; then log "NetworkManager config reloaded"; else warn "reload NetworkManager failed - reboot"; fi
+  (( $(section_changes) == c0 )) || res_conf=1
+  if (( nm_conf )); then
+    if systemctl reload NetworkManager; then log "NetworkManager config reloaded"; else warn "reload NetworkManager failed - reboot"; fi
+  fi
   # existing Wi-Fi / cable profiles, written in the profile:
   # - no hostname in DHCP
   # - no DNS servers (static or from DHCP): only the tunnel has one. With a server on the
@@ -1121,43 +1300,65 @@ EOF
   #   (dns=none above already keeps them out of resolved: belt and braces).
   # - IPv6 off (UPLINK_IPV6=off): ipv6.method has no global default either. Fewer
   #   packets on the LAN (router solicitations, DHCPv6), no IPv6 address from it.
-  backup /etc/NetworkManager/system-connections
-  local uuid type n=0
+  # profiles: the fields before and after nmcli modify (same values = nothing changed);
+  # the folder copied first, kept as backup only when a profile changed
+  local uuid type n=0 m=0 before after snap
+  local f=ipv4.dns,ipv4.ignore-auto-dns,ipv6.dns,ipv6.ignore-auto-dns,ipv4.dhcp-send-hostname,ipv6.dhcp-send-hostname,ipv6.method
   local -a v6arg=()
   [[ -z $v6 ]] || v6arg=(ipv6.method "$v6")
+  snap=$(mktemp -d)
+  cp -a /etc/NetworkManager/system-connections "$snap/"
   while IFS=: read -r uuid type; do
     case $type in 802-11-wireless|802-3-ethernet) ;; *) continue ;; esac
+    before=$(nmcli -g "$f" connection show "$uuid" 2>/dev/null) || before="?"
     if nmcli connection modify "$uuid" ipv4.dhcp-send-hostname no ipv6.dhcp-send-hostname no \
          ipv4.dns "" ipv4.ignore-auto-dns yes ipv6.dns "" ipv6.ignore-auto-dns yes "${v6arg[@]}"; then
       n=$((n + 1))
+      after=$(nmcli -g "$f" connection show "$uuid" 2>/dev/null) || after="??"
+      if [[ $before != "$after" ]]; then m=$((m + 1)); changed "NetworkManager profile $uuid"; fi
     else
       warn "profile $uuid: not changed"
     fi
   done < <(nmcli -g UUID,TYPE connection show)
-  log "no hostname in DHCP, no DNS servers${v6:+, IPv6 $v6} on $n Wi-Fi / cable profiles"
+  if (( m )) && [[ ! -e $BACKUP_ROOT/etc/NetworkManager/system-connections ]]; then
+    mkdir -p "$BACKUP_ROOT/etc/NetworkManager"
+    cp -a "$snap/system-connections" "$BACKUP_ROOT/etc/NetworkManager/"
+  fi
+  rm -rf "$snap"
+  log "no hostname in DHCP, no DNS servers${v6:+, IPv6 $v6} on $n Wi-Fi / cable profiles ($m changed)"
   # profiles made later (a new network): the same on their first connect (dispatcher hook,
   # input = profile uuid only). The hostname: the generic one covers the first DHCP.
   sed "s/^IPV6_METHOD=[a-z]*/IPV6_METHOD=${v6}/" "$src" | write_file "$hook" 0755
-  # live connections: reapply (no reconnect, same MAC and lease)
+  # live connections: reapply after a change (no reconnect, same MAC and lease)
   local dev state
-  while IFS=: read -r dev type state; do
-    case $type in wifi|ethernet) ;; *) continue ;; esac
-    [[ $state == connected ]] || continue
-    if nmcli device reapply "$dev" >/dev/null; then log "reapplied $dev"; else warn "reapply $dev failed - reconnect it"; fi
-  done < <(nmcli -g DEVICE,TYPE,STATE device)
+  if (( m || nm_conf )); then
+    while IFS=: read -r dev type state; do
+      case $type in wifi|ethernet) ;; *) continue ;; esac
+      [[ $state == connected ]] || continue
+      if nmcli device reapply "$dev" >/dev/null; then log "reapplied $dev"; else warn "reapply $dev failed - reconnect it"; fi
+    done < <(nmcli -g DEVICE,TYPE,STATE device)
+  fi
   # profiles made later send the hostname on their first connect (NetworkManager 1.56.1
   # ignores the global dhcp-send-hostname default): a generic hostname
   if [[ -n $GENERIC_HOSTNAME ]]; then
-    hostnamectl set-hostname --static "$GENERIC_HOSTNAME"
-    hostnamectl set-hostname --pretty ""     # pretty name = Bluetooth / GNOME device name
+    if [[ $(hostnamectl hostname --static 2>/dev/null || true) != "$GENERIC_HOSTNAME" ]]; then
+      hostnamectl set-hostname --static "$GENERIC_HOSTNAME"; changed "static hostname $GENERIC_HOSTNAME"
+    fi
+    if [[ -n $(hostnamectl hostname --pretty 2>/dev/null || true) ]]; then
+      hostnamectl set-hostname --pretty ""   # pretty name = Bluetooth / GNOME device name
+      changed "pretty hostname empty"
+    fi
     # static "localhost" counts as unset: hostnamed then shows the distro fallback
     # ("fedora") as transient hostname. Same name as fallback (systemd.io ENVIRONMENT).
+    c0=$(section_changes)
     write_file /etc/systemd/system/systemd-hostnamed.service.d/90-privacy.conf 0644 <<EOF
 [Service]
 Environment=SYSTEMD_DEFAULT_HOSTNAME=${GENERIC_HOSTNAME}
 EOF
-    systemctl daemon-reload
-    systemctl try-restart systemd-hostnamed.service || true
+    if (( $(section_changes) != c0 )); then
+      systemctl daemon-reload
+      systemctl try-restart systemd-hostnamed.service || true
+    fi
     # The initramfs comes with the image (no /etc/hostname in it): its systemd set the
     # fallback "fedora" for the first ~12 s of boot. The kernel hands KEY=value args it
     # does not know to PID 1 as environment, in the initramfs too (tested 2026-10-27).
@@ -1165,8 +1366,11 @@ EOF
     log "hostname: $GENERIC_HOSTNAME (log out and in: X11 apps keep the old name in Xauthority)"
   fi
   # reload, not restart: a restart drops the DNS servers Mullvad set on its link
-  if systemctl reload systemd-resolved; then log "resolved config reloaded"; else warn "reload systemd-resolved failed - reboot"; fi
-  log "new MAC on the next connect: reconnect Wi-Fi / cable, or reboot"
+  if (( res_conf )); then
+    if systemctl reload systemd-resolved; then log "resolved config reloaded"; else warn "reload systemd-resolved failed - reboot"; fi
+  fi
+  (( nm_conf == 0 )) || log "new MAC on the next connect: reconnect Wi-Fi / cable, or reboot"
+
 }
 
 # CIS: chrony with configured servers. Beyond CIS: authenticated time only (NTS, RFC 8915).
@@ -1188,7 +1392,9 @@ sec_mullvad() {
   if ! unit_exists mullvad-daemon.service; then
     warn "mullvad-daemon.service not found - skipped"; return 0
   fi
-  groupadd -r -f "$MULLVAD_SOCKET_GROUP"
+  if ! getent group "$MULLVAD_SOCKET_GROUP" >/dev/null; then
+    groupadd -r "$MULLVAD_SOCKET_GROUP"; changed "group $MULLVAD_SOCKET_GROUP"
+  fi
   # socket = full daemon control: the admin when there is one (accounts section)
   local who=${ADMIN_USER:-$TARGET_USER}
   if [[ -n $ADMIN_USER ]] && ! id "$ADMIN_USER" >/dev/null 2>&1; then
@@ -1201,6 +1407,7 @@ sec_mullvad() {
   else
     usermod -aG "$MULLVAD_SOCKET_GROUP" "$who"
     log "$who added to $MULLVAD_SOCKET_GROUP (log out and in, then mullvad works again)"
+    changed "$who in $MULLVAD_SOCKET_GROUP"
   fi
   if [[ -f $dropin ]] && grep -qxF "$line" "$dropin"; then
     log "$dropin already set"; return 0
@@ -1291,8 +1498,13 @@ EOF
     write_file "$unit" 0644 <<<"$unit_text"
     systemctl daemon-reload
   fi
-  systemctl enable kvmlan.service >/dev/null 2>&1 && log "kvmlan.service enabled"
-  if systemctl reload-or-restart kvmlan.service; then log "table inet kvmlan loaded: ${MULLVAD_VM_BRIDGES[*]}"
+  if [[ $(unit_state kvmlan.service) != enabled ]]; then
+    if systemctl enable kvmlan.service >/dev/null 2>&1; then log "kvmlan.service enabled"; changed "enabled kvmlan.service"
+    else warn "could not enable kvmlan.service"; fi
+  fi
+  if (( $(section_changes) == 0 )) && systemctl is-active -q kvmlan.service; then
+    log "table inet kvmlan: no change (${MULLVAD_VM_BRIDGES[*]})"
+  elif systemctl reload-or-restart kvmlan.service; then log "table inet kvmlan loaded: ${MULLVAD_VM_BRIDGES[*]}"
   else warn "kvmlan.service failed: journalctl -u kvmlan"; fi
   lan=$(mullvad lan get 2>/dev/null || true)
   case $lan in
@@ -1310,13 +1522,23 @@ fw_policy() {
   if [[ " $(firewall-cmd --permanent --get-policies) " != *" $name "* ]]; then
     firewall-cmd --permanent --new-policy="$name" >/dev/null ||
       { warn "could not create firewalld policy $name - skipped"; return 1; }
-    log "firewalld policy $name created"
+    log "firewalld policy $name created"; changed "firewalld policy $name"
   fi
-  firewall-cmd --permanent --policy="$name" --query-ingress-zone="$in" >/dev/null ||
-    firewall-cmd --permanent --policy="$name" --add-ingress-zone="$in" >/dev/null || warn "policy $name: ingress $in"
-  firewall-cmd --permanent --policy="$name" --query-egress-zone="$out" >/dev/null ||
-    firewall-cmd --permanent --policy="$name" --add-egress-zone="$out" >/dev/null || warn "policy $name: egress $out"
-  firewall-cmd --permanent --policy="$name" --set-target="$target" >/dev/null || warn "policy $name: target $target"
+  if ! firewall-cmd --permanent --policy="$name" --query-ingress-zone="$in" >/dev/null 2>&1; then
+    if firewall-cmd --permanent --policy="$name" --add-ingress-zone="$in" >/dev/null; then
+      changed "firewalld policy $name ingress $in"
+    else warn "policy $name: ingress $in"; fi
+  fi
+  if ! firewall-cmd --permanent --policy="$name" --query-egress-zone="$out" >/dev/null 2>&1; then
+    if firewall-cmd --permanent --policy="$name" --add-egress-zone="$out" >/dev/null; then
+      changed "firewalld policy $name egress $out"
+    else warn "policy $name: egress $out"; fi
+  fi
+  if [[ $(firewall-cmd --permanent --policy="$name" --get-target 2>/dev/null || true) != "$target" ]]; then
+    if firewall-cmd --permanent --policy="$name" --set-target="$target" >/dev/null; then
+      changed "firewalld policy $name target $target"
+    else warn "policy $name: target $target"; fi
+  fi
 }
 
 ## Not CIS, NIST SP 800-53 SC-44 (detonation chamber) / SC-39 / CIS Controls v8.1 Control 9:
@@ -1351,30 +1573,37 @@ sec_browsevm() {
   else
     firewall-cmd --permanent --new-zone="$zone" >/dev/null ||
       { warn "could not create firewalld zone $zone - skipped"; return 0; }
-    log "firewalld zone $zone created"
+    log "firewalld zone $zone created"; changed "firewalld zone $zone"
   fi
   fw_policy "$zone-nat-out" "$zone" ANY ACCEPT || return 0
   fw_policy "$zone-to-host" "$zone" HOST REJECT || return 0
-  firewall-cmd --permanent --policy="$zone-to-host" --query-service=dhcp >/dev/null ||
-    firewall-cmd --permanent --policy="$zone-to-host" --add-service=dhcp >/dev/null ||
-    warn "policy $zone-to-host: dhcp not added"
+  if ! firewall-cmd --permanent --policy="$zone-to-host" --query-service=dhcp >/dev/null 2>&1; then
+    if firewall-cmd --permanent --policy="$zone-to-host" --add-service=dhcp >/dev/null; then
+      changed "firewalld policy $zone-to-host service dhcp"
+    else warn "policy $zone-to-host: dhcp not added"; fi
+  fi
   for have in $(firewall-cmd --permanent --policy="$zone-to-host" --list-services); do
     [[ $have == dhcp ]] || {
       firewall-cmd --permanent --policy="$zone-to-host" --remove-service="$have" >/dev/null || true
-      log "policy $zone-to-host: service $have removed (dns: own bridge address only, below)"; }
+      log "policy $zone-to-host: service $have removed (dns: own bridge address only, below)"
+      changed "firewalld policy $zone-to-host -service $have"; }
   done
-  firewall-cmd --permanent --policy="$zone-to-host" --query-rich-rule="$rule" >/dev/null ||
-    firewall-cmd --permanent --policy="$zone-to-host" --add-rich-rule="$rule" >/dev/null ||
-    warn "policy $zone-to-host: DNS rule not added"
+  if ! firewall-cmd --permanent --policy="$zone-to-host" --query-rich-rule="$rule" >/dev/null 2>&1; then
+    if firewall-cmd --permanent --policy="$zone-to-host" --add-rich-rule="$rule" >/dev/null; then
+      changed "firewalld policy $zone-to-host DNS rule"
+    else warn "policy $zone-to-host: DNS rule not added"; fi
+  fi
   while IFS= read -r have; do
     # ours (also when firewalld writes it back in another spacing / order)
     [[ -z $have || ( $have == *"address=\"$BROWSEVM_NET.1\""* && $have == *"name=\"dns\""* ) ]] && continue
     firewall-cmd --permanent --policy="$zone-to-host" --remove-rich-rule="$have" >/dev/null || true
-    log "policy $zone-to-host: rule removed: $have"
+    log "policy $zone-to-host: rule removed: $have"; changed "firewalld policy $zone-to-host -rule"
   done < <(firewall-cmd --permanent --policy="$zone-to-host" --list-rich-rules)
   log "policy $zone-to-host: DHCP, DNS to $BROWSEVM_NET.1 only, the rest rejected"
-  if firewall-cmd --reload >/dev/null; then log "firewalld reloaded (own tables only: hostfw, Mullvad, kvmlan stay)"
-  else warn "firewall-cmd --reload failed"; fi
+  if (( $(section_changes) )); then
+    if firewall-cmd --reload >/dev/null; then log "firewalld reloaded (own tables only: hostfw, Mullvad, kvmlan stay)"
+    else warn "firewall-cmd --reload failed"; fi
+  fi
 
   # libvirt network: NAT, own bridge in that zone, no autostart, no IPv6
   write_file "$xml" 0644 <<EOF
@@ -1399,9 +1628,12 @@ EOF
   else
     virsh -q -c qemu:///system net-define "$xml" >/dev/null ||
       { warn "virsh net-define $xml failed"; return 0; }
-    log "libvirt network $net defined"
+    log "libvirt network $net defined"; changed "libvirt network $net"
   fi
-  virsh -q -c qemu:///system net-autostart --disable "$net" >/dev/null 2>&1 || true
+  if virsh -q -c qemu:///system net-info "$net" 2>/dev/null | grep -E '^Autostart: *yes' >/dev/null; then
+    virsh -q -c qemu:///system net-autostart --disable "$net" >/dev/null 2>&1 || true
+    changed "libvirt network $net autostart off"
+  fi
 
   # the other two places that must know the bridge
   if [[ " ${MULLVAD_VM_BRIDGES[*]} " != *" $BROWSEVM_BRIDGE "* ]]; then
@@ -1435,7 +1667,7 @@ sec_svirt() {
   done
   if (( ${#on[@]} )); then
     # one policy rebuild for all of them (-P: kept over reboots)
-    if setsebool -P "${on[@]}"; then log "booleans set (persistent): ${on[*]}"
+    if setsebool -P "${on[@]}"; then log "booleans set (persistent): ${on[*]}"; changed "booleans ${on[*]}"
     else warn "setsebool -P ${on[*]} failed"; fi
   fi
 
@@ -1443,7 +1675,6 @@ sec_svirt() {
   if grep -Eq '^[[:space:]]*security_require_confined[[:space:]]*=[[:space:]]*1[[:space:]]*$' "$conf"; then
     log "$conf: security_require_confined = 1"
   else
-    backup "$conf"
     set_kv "$conf" security_require_confined 1
     log "$conf: security_require_confined = 1 (a domain without sVirt is refused)"
     # the daemon reads qemu.conf at start; running VMs survive its restart
@@ -1465,7 +1696,7 @@ sec_svirt() {
 sec_usbguard() {
   local rules=/etc/usbguard/rules.conf conf=/etc/usbguard/usbguard-daemon.conf
   local pk=/etc/polkit-1/rules.d/70-usbguard-gnome.rules tool=/usr/local/sbin/usb-allow-storage
-  local src gen changed=0
+  local src gen cfg_changed=0 c0
   src="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/usbguard/usb-allow-storage.sh"
   if ! rpm -q usbguard >/dev/null 2>&1; then
     warn "usbguard not installed: rpm-ostree install usbguard, reboot, run again"
@@ -1485,7 +1716,7 @@ sec_usbguard() {
     grep -q ' 03:01:01' <<<"$gen" || warn "no USB keyboard in the rules (fine if the keyboard is not USB)"
     write_file "$rules" 0600 <<<"$gen"
     log "$(grep -c '^allow ' "$rules") allow / $(grep -c '^block ' "$rules") block rules from the devices present now"
-    changed=1
+    cfg_changed=1
   fi
 
   # IPC (usbguard CLI) for root only; Fedora default also lets wheel change rules without
@@ -1498,7 +1729,7 @@ sec_usbguard() {
     grep -qx 'IPCAllowedGroups=' "$conf" || printf 'IPCAllowedGroups=\n' >> "$conf"
     restorecon -F "$conf" 2>/dev/null || true
     log "usbguard IPC: root only (usbguard CLI needs sudo)"
-    changed=1
+    cfg_changed=1; changed "$conf IPCAllowedGroups="
   fi
 
   # flash drives: a root owned copy, a root tool never runs from my home
@@ -1508,16 +1739,17 @@ sec_usbguard() {
     backup "$tool"
     install -o root -g root -m 0755 "$src" "$tool"
     restorecon -F "$tool" 2>/dev/null || true
-    log "installed $tool (flash drive: sudo usb-allow-storage)"
+    log "installed $tool (flash drive: sudo usb-allow-storage)"; changed "$tool"
   fi
 
   # GNOME usb-protection off + locked (GNOME default is on)
   if [[ -e $pk ]]; then
     backup "$pk"
     rm -f "$pk"
-    log "removed $pk"
+    log "removed $pk"; changed "removed $pk"
   fi
   grep -qs 'system-db:local' /etc/dconf/profile/user || warn "no system-db:local in /etc/dconf/profile/user: run the gnome section first"
+  c0=$(section_changes)
   write_file /etc/dconf/db/local.d/90-usbguard 0644 <<'EOF'
 [org/gnome/desktop/privacy]
 usb-protection=false
@@ -1525,26 +1757,34 @@ EOF
   write_file /etc/dconf/db/local.d/locks/90-usbguard 0644 <<'EOF'
 /org/gnome/desktop/privacy/usb-protection
 EOF
-  dconf update && log "dconf updated"
-  if rpm -q usbguard-dbus >/dev/null 2>&1; then
+  if (( $(section_changes) != c0 )); then
+    if dconf update; then log "dconf updated"; else warn "dconf update failed - run: sudo dconf update"; fi
+  fi
+  if rpm -q usbguard-dbus >/dev/null 2>&1 && [[ $(unit_state usbguard-dbus.service) != masked* ]]; then
     systemctl disable --now usbguard-dbus.service >/dev/null 2>&1 || true
-    systemctl mask usbguard-dbus.service >/dev/null 2>&1 && log "usbguard-dbus masked"
+    if systemctl mask usbguard-dbus.service >/dev/null 2>&1; then log "usbguard-dbus masked"; changed "masked usbguard-dbus.service"
+    else warn "could not mask usbguard-dbus.service"; fi
+  fi
+  if rpm -q usbguard-dbus >/dev/null 2>&1; then
     warn "usbguard-dbus not needed: rpm-ostree uninstall usbguard-dbus, reboot"
   fi
 
   if systemctl is-enabled -q usbguard.service; then
-    if (( changed )); then systemctl restart usbguard.service && log "usbguard restarted"; fi
+    if (( cfg_changed )); then
+      if systemctl restart usbguard.service; then log "usbguard restarted"; else warn "usbguard restart failed"; fi
+    fi
     log "usbguard enabled"
   elif systemctl is-active -q usbguard.service; then
-    if (( changed )); then
+    if (( cfg_changed )); then
       systemctl restart usbguard.service
       warn "config changed: usbguard restarted, still NOT enabled - test again, then run again"
       return 0
     fi
-    systemctl enable usbguard.service && log "usbguard enabled (from the next boot too)"
+    systemctl enable usbguard.service
+    log "usbguard enabled (from the next boot too)"; changed "enabled usbguard.service"
   else
     systemctl start usbguard.service
-    log "usbguard started, NOT enabled (a reboot turns it off again)"
+    log "usbguard started, NOT enabled (a reboot turns it off again)"; changed "started usbguard.service"
     log "test: keyboard + touchpad, a new device stays blocked, sudo usb-allow-storage; then run this section again"
   fi
 }
@@ -1560,7 +1800,7 @@ sec_appunit() {
     backup "$tool"
     install -o root -g root -m 0755 "$src" "$tool"
     restorecon -F "$tool" 2>/dev/null || true
-    log "installed $tool"
+    log "installed $tool"; changed "$tool"
   fi
   home=""
   [[ -n $TARGET_USER ]] && home=$(user_home "$TARGET_USER")
@@ -1595,7 +1835,7 @@ sec_appunit() {
 # fwupd: no report to LVFS from any remote (no ReportURI = nothing to send to, even after
 # a "yes" by mistake; Automatic*Reports=false). Same edit as admin script 27 (2026-11-16).
 fwupd_reports_off() {
-  local f new changed=0
+  local f new cfg_changed=0
   for f in /etc/fwupd/remotes.d/*.conf; do
     [[ -f $f ]] || continue
     grep -qE '^#?[[:space:]]*(Security)?ReportURI[[:space:]]*=' "$f" || continue
@@ -1611,9 +1851,9 @@ fwupd_reports_off() {
     printf '%s\n' "$new" > "$f"
     restorecon -F "$f" 2>/dev/null || true
     log "$f: firmware reports off (no report address, nothing automatic)"
-    changed=1
+    cfg_changed=1; changed "$f reports off"
   done
-  if (( changed )); then
+  if (( cfg_changed )); then
     systemctl try-restart fwupd.service >/dev/null 2>&1 || true
   fi
 }
@@ -1637,12 +1877,16 @@ sec_autoupdate() {
         printf '[Daemon]\nAutomaticUpdatePolicy=%s\n' "$AUTO_UPDATE_POLICY" >> "$conf"
       fi
       restorecon -F "$conf" 2>/dev/null || true
-      log "$conf: AutomaticUpdatePolicy=$AUTO_UPDATE_POLICY"
+      log "$conf: AutomaticUpdatePolicy=$AUTO_UPDATE_POLICY"; changed "$conf AutomaticUpdatePolicy=$AUTO_UPDATE_POLICY"
       rpm-ostree reload || warn "rpm-ostree reload failed"
     fi
     if [[ $AUTO_UPDATE_POLICY == none ]]; then
-      systemctl disable --now rpm-ostreed-automatic.timer >/dev/null 2>&1 && log "rpm-ostreed-automatic.timer off"
-    elif systemctl enable --now rpm-ostreed-automatic.timer >/dev/null 2>&1; then
+      if [[ $(unit_state rpm-ostreed-automatic.timer) == enabled ]] || systemctl is-active -q rpm-ostreed-automatic.timer; then
+        if systemctl disable --now rpm-ostreed-automatic.timer >/dev/null 2>&1; then
+          log "rpm-ostreed-automatic.timer off"; changed "disabled rpm-ostreed-automatic.timer"
+        else warn "could not disable rpm-ostreed-automatic.timer"; fi
+      fi
+    elif enable_unit rpm-ostreed-automatic.timer now; then
       log "rpm-ostreed-automatic.timer on (an hour after boot, then daily)"
     else
       warn "could not enable rpm-ostreed-automatic.timer"
@@ -1666,9 +1910,11 @@ sec_autoupdate() {
       warn "FIRMWARE_METADATA_CALENDAR '$FIRMWARE_METADATA_CALENDAR': not a systemd calendar - timer left as it is"
     else
       local dropin=/etc/systemd/system/fwupd-refresh.timer.d
+      local c0
+      c0=$(section_changes)
       if [[ -f $dropin/50-once-a-day.conf ]]; then         # name until 2026-11-16
         backup "$dropin/50-once-a-day.conf"
-        rm -f "$dropin/50-once-a-day.conf"
+        rm -f "$dropin/50-once-a-day.conf"; changed "removed $dropin/50-once-a-day.conf"
       fi
       write_file "$dropin/50-schedule.conf" 0644 <<EOF
 # silverblue-cis-hardening: firmware metadata on a calendar (Fedora's timer: every hour)
@@ -1676,9 +1922,11 @@ sec_autoupdate() {
 OnCalendar=
 OnCalendar=$FIRMWARE_METADATA_CALENDAR
 EOF
-      systemctl daemon-reload
-      if systemctl enable fwupd-refresh.timer >/dev/null 2>&1 \
-          && systemctl restart fwupd-refresh.timer >/dev/null 2>&1; then
+      if (( $(section_changes) != c0 )); then
+        systemctl daemon-reload
+        systemctl try-restart fwupd-refresh.timer >/dev/null 2>&1 || true
+      fi
+      if enable_unit fwupd-refresh.timer now; then
         log "fwupd-refresh.timer on ($FIRMWARE_METADATA_CALENDAR, firmware metadata only, nothing installed)"
       else
         warn "could not enable fwupd-refresh.timer"
@@ -1743,13 +1991,15 @@ OnBootSec=20min
 WantedBy=timers.target
 EOF
   systemctl daemon-reload
-  if systemctl enable --now flatpak-update-system.timer >/dev/null 2>&1; then
+  if enable_unit flatpak-update-system.timer now; then
     log "flatpak-update-system.timer on (daily)"
   else
     warn "could not enable flatpak-update-system.timer"
   fi
-  if systemctl --global enable flatpak-update-user.timer >/dev/null 2>&1; then
-    log "flatpak-update-user.timer on for every user (from their next login)"
+  if [[ $(systemctl --global is-enabled flatpak-update-user.timer 2>/dev/null || true) == enabled ]]; then
+    log "flatpak-update-user.timer on for every user"
+  elif systemctl --global enable flatpak-update-user.timer >/dev/null 2>&1; then
+    log "flatpak-update-user.timer on for every user (from their next login)"; changed "enabled flatpak-update-user.timer (global)"
   else
     warn "could not enable flatpak-update-user.timer globally"
   fi
@@ -1775,8 +2025,10 @@ ntsdumpdir /var/lib/chrony
 leapseclist /usr/share/zoneinfo/leap-seconds.list
 logdir /var/log/chrony
 EOF
+  if (( $(section_changes) == 0 )); then return 0; fi
   if systemctl restart chronyd; then log "chronyd restarted"; else warn "restart chronyd failed: journalctl -u chronyd"; fi
   log "check in a minute: chronyc -N authdata (Mode NTS, KE > 0), chronyc -n sources"
+
 }
 
 # Not CIS: kernel args (KERNEL_ARGS). Used from the next boot; the deployment before it
@@ -1815,23 +2067,79 @@ sec_kargs() {
 # Main
 # -----------------------------------------------------------------------------
 usage() {
-  sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
   echo "Sections: ${SECTIONS[*]}"
 }
 
+# on_err: a command failed (set -e; -E: inside functions too). Says where, then the run
+# stops (EXIT trap: summary). Command substitutions and pipeline parts run in a subshell:
+# the line in the parent shell is reported (the subshell's command can mislead: under
+# pipefail the last command of a pipe, not the one that failed)
+on_err() {
+  local rc=$1 line=$2 cmd=$3 fn=${FUNCNAME[1]:-main}
+  (( BASH_SUBSHELL == 0 )) || return 0
+  printf '\e[31m[x]\e[0m STOP: section %s, %s line %s, exit %s: %s\n' \
+    "${CUR_SECTION:-none}" "$fn" "$line" "$rc" "$cmd" >&2
+}
+
+# on_exit: every end of a run (done, die, error): what each section changed, where it
+# stopped, what did not run, the backups (none: no folder)
+on_exit() {
+  local rc=$1 s n total=0 i
+  trap - ERR
+  if [[ -z $CHANGE_LOG ]]; then exit "$rc"; fi
+  printf '\n\e[1m== summary ==\e[0m\n'
+  for s in "${DONE_SECTIONS[@]}"; do
+    n=$(section_changes "$s"); total=$((total + n))
+    if (( n )); then printf '  %-12s %s change(s)\n' "$s" "$n"; else printf '  %-12s no change\n' "$s"; fi
+  done
+  if (( rc != 0 )) && [[ -n $CUR_SECTION ]]; then
+    n=$(section_changes "$CUR_SECTION"); total=$((total + n))
+    printf '  %-12s STOPPED (exit %s), %s change(s) before the stop\n' "$CUR_SECTION" "$rc" "$n"
+    for i in "${!RUN_LIST[@]}"; do
+      [[ ${RUN_LIST[i]} == "$CUR_SECTION" ]] || continue
+      if (( i + 1 < ${#RUN_LIST[@]} )); then printf '  not run: %s\n' "${RUN_LIST[*]:i+1}"; fi
+      break
+    done
+  fi
+  if [[ -d $BACKUP_ROOT ]]; then
+    printf 'Backups: %s\n' "$BACKUP_ROOT"
+  else
+    printf 'Backups: none (nothing replaced or removed)\n'
+  fi
+  if (( rc == 0 && total > 0 )); then
+    printf 'Reboot recommended (kernel modules, sysctl one-way switches, PAM).\n'
+  elif (( rc != 0 )); then
+    printf 'Stopped: fix the cause, then run the stopped section and the ones not run (undo: docs/rollback.md).\n'
+  fi
+  rm -f "$CHANGE_LOG"
+  exit "$rc"
+}
+
+RUN_LIST=()
+
 main() {
-  local s
-  local -a list
   if [[ $# -eq 0 || ${1:-} == --list || ${1:-} == -h ]]; then usage; exit 0; fi
   [[ $EUID -eq 0 ]] || die "run with sudo"
   if [[ -z $TARGET_USER ]]; then warn "SUDO_USER is empty - user-specific steps will be skipped"; fi
+  run_sections "$@"
+}
 
-  list=("$@")
-  if [[ ${list[0]} == all ]]; then list=("${SECTIONS[@]}"); fi
-  mkdir -p "$BACKUP_ROOT"
+# run_sections <section>... | all: each section and its changes; the summary comes when the
+# shell ends (EXIT trap). A failed command stops the run (on_err: section, line, command)
+run_sections() {
+  local s n
+  RUN_LIST=("$@")
+  if [[ ${RUN_LIST[0]} == all ]]; then RUN_LIST=("${SECTIONS[@]}"); fi
+  CHANGE_LOG=$(mktemp)
+  # two runs in the same second: own folder (the summary looks for this run's folder)
+  if [[ -e $BACKUP_ROOT ]]; then BACKUP_ROOT+="-$$"; fi
+  trap 'on_err $? $LINENO "$BASH_COMMAND"' ERR
+  trap 'on_exit $?' EXIT
 
-  for s in "${list[@]}"; do
+  for s in "${RUN_LIST[@]}"; do
     printf '\n\e[1m== %s ==\e[0m\n' "$s"
+    CUR_SECTION=$s
     case $s in
       sysctl)      sec_sysctl ;;
       modules)     sec_modules ;;
@@ -1864,9 +2172,17 @@ main() {
       kargs)       sec_kargs ;;
       *)           warn "unknown section: $s" ;;
     esac
+    n=$(section_changes)
+    if (( n )); then
+      log "$s: $n change(s):"
+      awk -F '\t' -v s="$s" '$1 == s && !seen[$0]++ { print "      " $2 }' "$CHANGE_LOG"
+    else
+      log "$s: no change"
+    fi
+    if [[ " ${SECTIONS[*]} " == *" $s "* ]]; then DONE_SECTIONS+=("$s"); fi
+    CUR_SECTION=""
   done
-
-  printf '\nBackups: %s\nReboot recommended (kernel modules, sysctl one-way switches, PAM).\n' "$BACKUP_ROOT"
 }
 
-main "$@"
+# run when executed; tests source the file for its functions
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then main "$@"; fi

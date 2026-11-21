@@ -3,7 +3,8 @@
 Undo per section. Run from the admin (two accounts) or a root shell.
 
 ```bash
-ls /var/backups/hardening/                       # restore files from here
+ls /var/backups/hardening/                       # restore files from here (one folder per run
+                                                 # that changed something: the files before it)
 sudo authselect disable-feature with-faillock    # PAM lockout off
 faillock --user "$USER" --reset                  # from a root shell, if locked
 sudo sed -i 's/^minlen = .*/minlen = 14/' /etc/security/pwquality.conf   # pam: CIS length (new passwords)

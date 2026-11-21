@@ -62,7 +62,12 @@ sudo ./harden-workstation.sh all
 ```
 
 - Edit the **Decisions** block at the top of the script first.
-- Every replaced file is backed up to `/var/backups/hardening/<timestamp>/`.
+- Every replaced or removed file is backed up to `/var/backups/hardening/<timestamp>/`
+  (a run that changes nothing: no folder).
+- Each section ends with its changes or `no change`, then a summary of the run; a second
+  run on the same machine: `no change` everywhere.
+- A failed command stops the run: section, line, command, then the summary (sections done,
+  stopped, not run). Fix the cause, run the stopped section and the ones after it.
 - Keep a root shell open (`sudo -i`) while running `sudo`, `su`, `pam`.
 - Reboot after the first full run. Undo: [docs/rollback.md](docs/rollback.md).
 
